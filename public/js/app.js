@@ -708,10 +708,25 @@ async function initializeLiveKitVoice(roomId) {
         };
         
         app.livekitVoice.onSpeakingChanged = (speakingIds) => {
-            // Update speaking indicators in UI
+            // Update speaking indicators for all users in app.users
             app.users.forEach(user => {
                 const isSpeaking = speakingIds.includes(user.id);
                 updateUserSpeakingState(user.id, isSpeaking);
+            });
+            
+            // Also update local user if not in app.users
+            if (app.user) {
+                const localSpeaking = speakingIds.includes(app.user.id);
+                updateUserSpeakingState(app.user.id, localSpeaking);
+            }
+            
+            // Also directly update all voice cards to clear speaking state
+            document.querySelectorAll('.voice-card').forEach(card => {
+                const userId = card.dataset.userId;
+                const isSpeaking = speakingIds.includes(userId);
+                card.classList.toggle('speaking', isSpeaking);
+                const avatar = card.querySelector('.user-avatar');
+                avatar?.classList.toggle('speaking', isSpeaking);
             });
         };
         
@@ -987,6 +1002,14 @@ async function toggleMute() {
             if (app.elements.pushToTalk) app.elements.pushToTalk.checked = false;
         }
         isMuted = app.livekitVoice.toggleMute();
+        
+        // If unmuting, also undeafen
+        if (!isMuted && app.livekitVoice.isDeafened) {
+            app.livekitVoice.setDeafened(false);
+            app.elements.deafenBtn.classList.remove('active');
+            app.elements.deafenBtn.querySelector('.icon-headphones').classList.remove('hidden');
+            app.elements.deafenBtn.querySelector('.icon-headphones-off').classList.add('hidden');
+        }
     } else if (app.audioHandler) {
         isMuted = app.audioHandler.toggleMute();
     }
@@ -995,11 +1018,12 @@ async function toggleMute() {
     app.elements.muteBtn.querySelector('.icon-mic').classList.toggle('hidden', isMuted);
     app.elements.muteBtn.querySelector('.icon-mic-off').classList.toggle('hidden', !isMuted);
     
-    // Update server
+    // Update server with both states
+    const isDeafened = app.livekitVoice?.isDeafened || false;
     await fetch(`/api/users/${app.user.id}/state`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isMuted })
+        body: JSON.stringify({ isMuted, isDeafened })
     });
 }
 
@@ -1008,33 +1032,43 @@ async function toggleMute() {
  */
 async function toggleDeafen() {
     let isDeafened = false;
+    let isMuted = false;
     
     // Control LiveKit if available
     if (app.livekitVoice) {
         isDeafened = app.livekitVoice.toggleDeafen();
+        
+        // If deafening, also mute mic
+        if (isDeafened) {
+            if (!app.livekitVoice.isMuted) {
+                app.livekitVoice.setMuted(true);
+            }
+            isMuted = true;
+        } else {
+            // If undeafening, also unmute mic
+            app.livekitVoice.setMuted(false);
+            isMuted = false;
+        }
     } else if (app.audioHandler) {
         isDeafened = app.audioHandler.toggleDeafen();
+        isMuted = isDeafened;
     }
     
+    // Update deafen button UI
     app.elements.deafenBtn.classList.toggle('active', isDeafened);
     app.elements.deafenBtn.querySelector('.icon-headphones').classList.toggle('hidden', isDeafened);
     app.elements.deafenBtn.querySelector('.icon-headphones-off').classList.toggle('hidden', !isDeafened);
     
-    // If deafened, also mute mic and show muted state
-    if (isDeafened) {
-        if (app.livekitVoice && !app.livekitVoice.isMuted) {
-            app.livekitVoice.setMuted(true);
-        }
-        app.elements.muteBtn.classList.add('active');
-        app.elements.muteBtn.querySelector('.icon-mic').classList.add('hidden');
-        app.elements.muteBtn.querySelector('.icon-mic-off').classList.remove('hidden');
-    }
+    // Update mute button UI
+    app.elements.muteBtn.classList.toggle('active', isMuted);
+    app.elements.muteBtn.querySelector('.icon-mic').classList.toggle('hidden', isMuted);
+    app.elements.muteBtn.querySelector('.icon-mic-off').classList.toggle('hidden', !isMuted);
     
-    // Update server
+    // Update server with both states
     await fetch(`/api/users/${app.user.id}/state`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isDeafened, isMuted: isDeafened })
+        body: JSON.stringify({ isDeafened, isMuted })
     });
 }
 
@@ -1280,7 +1314,7 @@ function addChatMessage(message) {
     const div = document.createElement('div');
     div.className = 'chat-message';
     div.innerHTML = `
-        <span class="sender">${escapeHtml(message.sender || 'Unknown')}</span>
+        <span class="sender">${escapeHtml(message.userName || message.sender || 'Unknown')}</span>
         <span class="time">${time}</span>
         <div class="content">${escapeHtml(message.content)}</div>
     `;
