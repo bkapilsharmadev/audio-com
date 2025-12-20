@@ -214,6 +214,13 @@
                         </button>
                     </div>
 
+                    <button id="chat-toggle-btn" class="voice-btn" title="Toggle Chat">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span id="unread-badge" class="unread-badge hidden">0</span>
+                    </button>
+
                     <div class="connection-status">
                         <div id="connection-indicator" class="indicator connected">
                             <span class="pulse"></span>
@@ -242,33 +249,34 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Chat Section (Optional) -->
-                <div class="chat-section glass-panel">
-                    <div class="chat-header">
-                        <h3>Chat</h3>
-                        <button id="toggle-chat-btn" class="btn-icon">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="6 9 12 15 18 9"/>
-                            </svg>
-                        </button>
-                    </div>
-                    <div id="chat-messages" class="chat-messages">
-                        <div class="welcome-message">
-                            <p>Welcome to the chat! Messages are visible to everyone in the channel.</p>
-                        </div>
-                    </div>
-                    <form id="chat-form" class="chat-input-wrapper">
-                        <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-                        <button type="submit" class="btn-send">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <line x1="22" y1="2" x2="11" y2="13"/>
-                                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                            </svg>
-                        </button>
-                    </form>
-                </div>
             </main>
+
+            <!-- Chat Sidebar (Right) -->
+            <aside id="chat-sidebar" class="chat-sidebar glass-panel">
+                <div class="chat-header">
+                    <h3>Chat</h3>
+                    <button id="toggle-chat-btn" class="btn-icon" title="Close Chat">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+                <div id="chat-messages" class="chat-messages">
+                    <div class="welcome-message">
+                        <p>Welcome to the chat! Messages are visible to everyone in the channel.</p>
+                    </div>
+                </div>
+                <form id="chat-form" class="chat-input-wrapper">
+                    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                    <button type="submit" class="btn-send">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </form>
+            </aside>
         </div>
 
         <!-- Create Room Modal -->

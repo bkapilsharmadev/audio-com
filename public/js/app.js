@@ -10,6 +10,7 @@ const app = {
     currentRoom: null,
     rooms: [],
     users: [],
+    unreadMessages: 0,
     
     audioHandler: null,
     mumbleClient: null,
@@ -83,8 +84,10 @@ function cacheElements() {
         chatForm: document.getElementById('chat-form'),
         chatInput: document.getElementById('chat-input'),
         chatMessages: document.getElementById('chat-messages'),
-        chatSection: document.querySelector('.chat-section'),
+        chatSidebar: document.getElementById('chat-sidebar'),
         toggleChatBtn: document.getElementById('toggle-chat-btn'),
+        chatToggleBtn: document.getElementById('chat-toggle-btn'),
+        unreadBadge: document.getElementById('unread-badge'),
         
         // Create room
         createRoomBtn: document.getElementById('create-room-btn'),
@@ -168,7 +171,7 @@ function setupEventListeners() {
     // Chat
     app.elements.chatForm.addEventListener('submit', handleChatSubmit);
     app.elements.toggleChatBtn?.addEventListener('click', toggleChat);
-    app.elements.chatSection?.querySelector('.chat-header')?.addEventListener('click', toggleChat);
+    app.elements.chatToggleBtn?.addEventListener('click', toggleChat);
     
     // Create room
     app.elements.createRoomBtn.addEventListener('click', () => openModal('createRoomModal'));
@@ -1327,6 +1330,14 @@ function addChatMessage(message) {
     
     messagesContainer.appendChild(div);
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Update unread count if chat is closed and message is from someone else
+    const isChatOpen = app.elements.chatSidebar?.classList.contains('open');
+    const isOwnMessage = message.userId === app.user?.id;
+    if (!isChatOpen && !isOwnMessage) {
+        app.unreadMessages++;
+        updateUnreadBadge();
+    }
 }
 
 /**
@@ -1662,10 +1673,39 @@ function closeSidebar() {
 }
 
 /**
- * Toggle chat section on mobile
+ * Toggle chat sidebar
  */
 function toggleChat() {
-    app.elements.chatSection?.classList.toggle('expanded');
+    const chatSidebar = app.elements.chatSidebar;
+    if (!chatSidebar) return;
+    
+    const isOpen = chatSidebar.classList.toggle('open');
+    
+    // Update button active state
+    app.elements.chatToggleBtn?.classList.toggle('active', isOpen);
+    
+    // Reset unread count when opening
+    if (isOpen) {
+        app.unreadMessages = 0;
+        updateUnreadBadge();
+        // Focus input when opening
+        setTimeout(() => app.elements.chatInput?.focus(), 100);
+    }
+}
+
+/**
+ * Update unread message badge
+ */
+function updateUnreadBadge() {
+    const badge = app.elements.unreadBadge;
+    if (!badge) return;
+    
+    if (app.unreadMessages > 0) {
+        badge.textContent = app.unreadMessages > 99 ? '99+' : app.unreadMessages;
+        badge.classList.remove('hidden');
+    } else {
+        badge.classList.add('hidden');
+    }
 }
 
 /**
