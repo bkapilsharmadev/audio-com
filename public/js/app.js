@@ -395,8 +395,26 @@ async function loadRooms() {
  */
 async function loadUsers() {
     try {
-        const response = await fetch('/api/users');
+        // Fetch users in current room if we're in one
+        const url = app.currentRoom ? `/api/users?roomId=${app.currentRoom}` : '/api/users';
+        const response = await fetch(url);
         app.users = await response.json();
+        
+        // Ensure current user is in the list if they're in the room
+        if (app.user && app.currentRoom && app.user.roomId === app.currentRoom) {
+            const selfInList = app.users.find(u => u.id === app.user.id);
+            if (!selfInList) {
+                app.users.push({
+                    id: app.user.id,
+                    name: app.user.name,
+                    roomId: app.user.roomId,
+                    isMuted: app.user.isMuted || false,
+                    isDeafened: app.user.isDeafened || false,
+                    isSpeaking: false
+                });
+            }
+        }
+        
         renderUserList();
         updateVoiceGrid();
     } catch (error) {
@@ -446,8 +464,11 @@ function renderUserList() {
     const userList = app.elements.userList;
     userList.innerHTML = '';
     
+    // Get current room (prefer app.currentRoom, fall back to user's roomId)
+    const currentRoomId = app.currentRoom || app.user?.roomId;
+    
     // Filter users in current room (only show users who have joined a room)
-    const roomUsers = app.users.filter(u => u.roomId && u.roomId === app.currentRoom);
+    const roomUsers = app.users.filter(u => u.roomId && u.roomId === currentRoomId);
     
     app.elements.userCount.textContent = roomUsers.length;
     
@@ -535,6 +556,7 @@ async function joinRoom(roomId, password = null) {
         
         // Update state
         app.user.roomId = roomId;
+        app.currentRoom = roomId;
         
         // Update UI
         updateActiveRoom(data.roomName);
