@@ -201,6 +201,19 @@ class MumbleClient {
     }
 
     /**
+     * Handle user state (muted/deafened) change
+     */
+    handleUserStateChanged(message) {
+        const user = this.users.get(message.userId);
+        if (user) {
+            user.isMuted = message.isMuted;
+            user.isDeafened = message.isDeafened;
+            user.isSpeaking = message.isSpeaking;
+        }
+        this.onStateChanged?.(message.userId, message.isMuted, message.isDeafened);
+    }
+
+    /**
      * Handle channel update
      */
     handleChannelUpdate(message) {
