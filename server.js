@@ -736,26 +736,35 @@ if (srv) {
     // Create WebSocket server for chat FIRST (it will set up its own upgrade handler)
     globalWss = setupWebSocket(srv);
 
-    // Now override the upgrade handler to route /livekit to proxy, /ws to chat WS
+    // Now override the upgrade handler to route /livekit to proxy, /ws to chat WS.
+    // This is critical: /ws must NEVER be forwarded to LiveKit.
     if (livekitProxy?.upgrade) {
-        // Remove any existing upgrade listeners added by ws library
-        const existingListeners = srv.listeners('upgrade');
+        const getPathname = (rawUrl) => {
+            if (!rawUrl) return '';
+            const q = rawUrl.indexOf('?');
+            return q === -1 ? rawUrl : rawUrl.slice(0, q);
+        };
+
         srv.removeAllListeners('upgrade');
-        
+
         srv.on('upgrade', (req, socket, head) => {
-            const url = req?.url || '';
-            if (url.startsWith('/livekit')) {
-                // Route to LiveKit proxy
-                livekitProxy.upgrade(req, socket, head);
-            } else if (url.startsWith('/ws')) {
-                // Route to chat WebSocket server
+            const pathname = getPathname(req?.url);
+
+            // Route chat/control WebSocket
+            if (pathname === '/ws' || pathname.startsWith('/ws/')) {
                 globalWss.handleUpgrade(req, socket, head, (ws) => {
                     globalWss.emit('connection', ws, req);
                 });
-            } else {
-                // Unknown path - destroy socket
-                socket.destroy();
+                return;
             }
+
+            // Route LiveKit signaling proxy
+            if (pathname === '/livekit' || pathname.startsWith('/livekit/')) {
+                livekitProxy.upgrade(req, socket, head);
+                return;
+            }
+
+            socket.destroy();
         });
     }
     
