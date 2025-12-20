@@ -366,6 +366,10 @@ async function connectToServer() {
         updateUserSpeakingState(user.id, user.isSpeaking);
     };
     
+    app.mumbleClient.onStateChanged = (userId, isMuted, isDeafened) => {
+        updateUserMutedState(userId, isMuted, isDeafened);
+    };
+    
     app.mumbleClient.onMessage = (message) => {
         addChatMessage(message);
     };
@@ -680,6 +684,10 @@ async function initializeLiveKitVoice(roomId) {
             });
         };
         
+        app.livekitVoice.onStateChanged = (userId, isMuted, isDeafened) => {
+            updateUserMutedState(userId, isMuted, isDeafened);
+        };
+        
         app.livekitVoice.onConnectionStateChanged = (connected) => {
             updateConnectionStatus(connected);
             if (connected) {
@@ -847,6 +855,46 @@ function updateUserSpeakingState(userId, isSpeaking) {
         voiceCard.classList.toggle('speaking', isSpeaking);
         const avatar = voiceCard.querySelector('.user-avatar');
         avatar?.classList.toggle('speaking', isSpeaking);
+    }
+}
+
+/**
+ * Update user muted/deafened state in UI
+ */
+function updateUserMutedState(userId, isMuted, isDeafened) {
+    // Find user in app.users array
+    const user = app.users.find(u => u.id === userId);
+    if (user) {
+        user.isMuted = isMuted;
+        user.isDeafened = isDeafened;
+    }
+    
+    // Update in user list
+    const userListItem = document.querySelector(`.user-item[data-user-id="${userId}"]`);
+    if (userListItem) {
+        const muteIcon = userListItem.querySelector('.user-status .mute-icon');
+        const deafenIcon = userListItem.querySelector('.user-status .deafen-icon');
+        
+        if (muteIcon) {
+            muteIcon.style.display = isMuted ? 'inline' : 'none';
+        }
+        if (deafenIcon) {
+            deafenIcon.style.display = isDeafened ? 'inline' : 'none';
+        }
+    }
+    
+    // Update in voice grid
+    const voiceCard = document.querySelector(`.voice-card[data-user-id="${userId}"]`);
+    if (voiceCard) {
+        const muteIndicator = voiceCard.querySelector('.mute-indicator');
+        const deafenIndicator = voiceCard.querySelector('.deafen-indicator');
+        
+        if (muteIndicator) {
+            muteIndicator.style.display = isMuted ? 'block' : 'none';
+        }
+        if (deafenIndicator) {
+            deafenIndicator.style.display = isDeafened ? 'block' : 'none';
+        }
     }
 }
 

@@ -28,6 +28,7 @@ class MumbleClient {
         this.onUserSpeaking = null;
         this.onChannelUpdate = null;
         this.onMessage = null;
+        this.onStateChanged = null;
         
         // Audio handling
         this.audioHandler = null;
@@ -135,6 +136,10 @@ class MumbleClient {
                     
                 case 'user-speaking':
                     this.handleUserSpeaking(message);
+                    break;
+                    
+                case 'user-state-changed':
+                    this.handleUserStateChanged(message);
                     break;
                     
                 case 'channel-update':

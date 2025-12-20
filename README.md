@@ -21,6 +21,8 @@ npm start
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions for AWS EC2 and DigitalOcean.
 
+For a deeper explanation of how the pieces fit together (Nginx ↔ Node ↔ LiveKit ↔ coturn), see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Architecture
 
 ```

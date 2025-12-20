@@ -54,7 +54,7 @@ Your Node server defaults to these values if not provided, but for production yo
 Your current [docker-compose.yml](docker-compose.yml) starts LiveKit with:
 
 ```yaml
-command: --dev --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-139.59.28.92}
+command: --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-139.59.28.92}
 ```
 
 In cloud hosting, this **must not** be your home LAN IP. Use the VM’s public IPv4 (or an address LiveKit should advertise for ICE candidates).
@@ -131,8 +131,8 @@ HOST=0.0.0.0
 HTTPS=false
 
 # Match livekit.conf
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret
+LIVEKIT_API_KEY=<your_key>
+LIVEKIT_API_SECRET=<your_secret>
 
 # Node -> LiveKit (inside the VM)
 LIVEKIT_INTERNAL_URL=http://127.0.0.1:7880

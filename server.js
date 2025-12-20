@@ -719,6 +719,17 @@ app.patch('/api/users/:userId/state', (req, res) => {
     if (typeof isDeafened === 'boolean') user.isDeafened = isDeafened;
     if (typeof isSpeaking === 'boolean') user.isSpeaking = isSpeaking;
     
+    // Broadcast state change to all users in the same room
+    if (user.roomId) {
+        broadcastToRoom(user.roomId, {
+            type: 'user-state-changed',
+            userId: user.id,
+            isMuted: user.isMuted,
+            isDeafened: user.isDeafened,
+            isSpeaking: user.isSpeaking
+        });
+    }
+    
     res.json({
         id: user.id,
         isMuted: user.isMuted,
