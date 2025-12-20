@@ -450,6 +450,11 @@ body::before {
     background: var(--danger);
 }
 
+/* Video button - active state is green (video on is positive) */
+#video-btn.active {
+    background: var(--success);
+}
+
 .voice-btn.disconnect {
     background: transparent;
     border: 2px solid var(--danger);
@@ -542,6 +547,74 @@ body::before {
     overflow-y: auto;
 }
 
+/* Video Grid */
+.video-grid {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 24px;
+    min-height: 200px;
+}
+
+.video-grid.hidden {
+    display: none;
+}
+
+.video-grid.grid-1 {
+    grid-template-columns: 1fr;
+    max-width: 800px;
+    margin: 0 auto 24px;
+}
+
+.video-grid.grid-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.video-grid.grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.video-grid.grid-many {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.video-tile {
+    position: relative;
+    background: #000;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+    border: 2px solid transparent;
+    transition: all var(--transition-normal);
+}
+
+.video-tile.local {
+    border-color: var(--accent-primary);
+}
+
+.video-tile video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.video-tile .video-name {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 8px 12px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.video-tile.speaking {
+    border-color: var(--success);
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+/* Voice Grid */
 .voice-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -602,6 +675,18 @@ body::before {
     color: var(--text-muted);
 }
 
+.voice-card .user-status-icons {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    min-height: 20px;
+}
+
+.voice-card .status-icon {
+    font-size: 0.9rem;
+    opacity: 0.8;
+}
+
 .voice-card .voice-indicator {
     display: flex;
     gap: 3px;
@@ -613,11 +698,20 @@ body::before {
     height: 16px;
     background: var(--text-muted);
     border-radius: 2px;
+    transform: scaleY(0.3);
+    transition: background var(--transition-fast);
+}
+
+/* Only animate when speaking AND not muted */
+.voice-card.speaking:not(.muted) .voice-indicator .bar {
+    background: var(--success);
     animation: voice-bar 0.5s ease-in-out infinite;
 }
 
-.voice-card.speaking .voice-indicator .bar {
-    background: var(--success);
+/* Show red/muted indicator when muted */
+.voice-card.muted .voice-indicator .bar {
+    background: var(--danger);
+    opacity: 0.5;
 }
 
 .voice-indicator .bar:nth-child(1) { animation-delay: 0s; }

@@ -192,6 +192,17 @@
                             </svg>
                         </button>
                         
+                        <button id="video-btn" class="voice-btn" title="Enable Video">
+                            <svg class="icon-video" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="23 7 16 12 23 17 23 7"/>
+                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                            </svg>
+                            <svg class="icon-video-off hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/>
+                                <line x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                        </button>
+                        
                         <button id="disconnect-btn" class="voice-btn disconnect" title="Disconnect">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/>
@@ -210,6 +221,11 @@
 
                 <!-- Voice Activity Grid -->
                 <div class="voice-area">
+                    <!-- Video Grid (shown when any participant has video) -->
+                    <div id="video-grid" class="video-grid hidden">
+                        <!-- Video tiles will be dynamically added here -->
+                    </div>
+                    
                     <div id="voice-grid" class="voice-grid">
                         <!-- Active speakers will be shown here -->
                         <div class="voice-placeholder">
@@ -365,6 +381,20 @@
                             <label for="output-volume">Output Volume</label>
                             <input type="range" id="output-volume" min="0" max="100" value="100">
                             <span id="output-volume-value">100%</span>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>Video</h3>
+                        <div class="form-group">
+                            <label for="video-device">Camera</label>
+                            <select id="video-device">
+                                <option value="">Default Camera</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="video-preview-container" style="display: none;">
+                            <label>Camera Preview</label>
+                            <video id="video-preview" autoplay muted playsinline style="width: 100%; max-width: 320px; border-radius: 8px; background: #000;"></video>
                         </div>
                     </div>
                     

@@ -70,12 +70,14 @@ function cacheElements() {
         muteBtn: document.getElementById('mute-btn'),
         enableAudioBtn: document.getElementById('enable-audio-btn'),
         deafenBtn: document.getElementById('deafen-btn'),
+        videoBtn: document.getElementById('video-btn'),
         disconnectBtn: document.getElementById('disconnect-btn'),
         connectionIndicator: document.getElementById('connection-indicator'),
         connectionText: document.getElementById('connection-text'),
         
-        // Voice grid
+        // Voice and Video grid
         voiceGrid: document.getElementById('voice-grid'),
+        videoGrid: document.getElementById('video-grid'),
         
         // Chat
         chatForm: document.getElementById('chat-form'),
@@ -103,6 +105,9 @@ function cacheElements() {
         settingsBtn: document.getElementById('settings-btn'),
         inputDevice: document.getElementById('input-device'),
         outputDevice: document.getElementById('output-device'),
+        videoDevice: document.getElementById('video-device'),
+        videoPreview: document.getElementById('video-preview'),
+        videoPreviewContainer: document.getElementById('video-preview-container'),
         inputVolume: document.getElementById('input-volume'),
         outputVolume: document.getElementById('output-volume'),
         inputVolumeValue: document.getElementById('input-volume-value'),
@@ -157,6 +162,7 @@ function setupEventListeners() {
     app.elements.enableAudioBtn.addEventListener('click', enableAudioHandler);
     app.elements.enableAudioBtn.addEventListener('touchstart', enableAudioHandler);
     app.elements.deafenBtn.addEventListener('click', toggleDeafen);
+    app.elements.videoBtn?.addEventListener('click', toggleVideo);
     app.elements.disconnectBtn.addEventListener('click', handleDisconnect);
     
     // Chat
@@ -179,6 +185,7 @@ function setupEventListeners() {
     app.elements.vadThreshold.addEventListener('input', handleVADThresholdChange);
     app.elements.inputDevice.addEventListener('change', handleInputDeviceChange);
     app.elements.outputDevice?.addEventListener('change', handleOutputDeviceChange);
+    app.elements.videoDevice?.addEventListener('change', handleVideoDeviceChange);
     app.elements.noiseSuppression?.addEventListener('change', handleNoiseSuppressionToggle);
     
     // Audio quality settings
@@ -696,6 +703,8 @@ async function initializeLiveKitVoice(roomId) {
         
         app.livekitVoice.onParticipantLeft = (participant) => {
             console.log('Voice: participant left:', participant.name);
+            // Remove their video tile if they had one
+            removeVideoTile(participant.id);
         };
         
         app.livekitVoice.onSpeakingChanged = (speakingIds) => {
@@ -739,6 +748,17 @@ async function initializeLiveKitVoice(roomId) {
                     muteBtn.title = 'Silent (VAD active)';
                 }
             }
+        };
+        
+        // Handle video track subscriptions
+        app.livekitVoice.onVideoTrackSubscribed = (track, participant) => {
+            console.log('Video: track subscribed from:', participant.identity);
+            addRemoteVideoTile(track, participant);
+        };
+        
+        app.livekitVoice.onVideoTrackUnsubscribed = (track, participant) => {
+            console.log('Video: track unsubscribed from:', participant.identity);
+            removeVideoTile(participant.identity);
         };
         
         // Connect to LiveKit room
@@ -825,7 +845,7 @@ function addUserToVoiceGrid(user) {
     const isMe = user.id === app.user?.id;
     
     const card = document.createElement('div');
-    card.className = `voice-card ${user.isSpeaking ? 'speaking' : ''}`;
+    card.className = `voice-card ${user.isSpeaking ? 'speaking' : ''} ${user.isMuted ? 'muted' : ''}`;
     card.dataset.userId = user.id;
     
     card.innerHTML = `
@@ -833,6 +853,10 @@ function addUserToVoiceGrid(user) {
             <span>${initial}</span>
         </div>
         <div class="user-name">${escapeHtml(user.name)}${isMe ? ' (you)' : ''}</div>
+        <div class="user-status-icons">
+            ${user.isMuted ? '<span class="status-icon muted" title="Muted">🔇</span>' : ''}
+            ${user.isDeafened ? '<span class="status-icon deafened" title="Deafened">🔕</span>' : ''}
+        </div>
         <div class="voice-indicator">
             <div class="bar"></div>
             <div class="bar"></div>
@@ -922,14 +946,17 @@ function updateUserMutedState(userId, isMuted, isDeafened) {
         voiceCard.classList.toggle('muted', isMuted);
         voiceCard.classList.toggle('deafened', isDeafened);
         
-        const muteIndicator = voiceCard.querySelector('.mute-indicator');
-        const deafenIndicator = voiceCard.querySelector('.deafen-indicator');
-        
-        if (muteIndicator) {
-            muteIndicator.style.display = isMuted ? 'block' : 'none';
-        }
-        if (deafenIndicator) {
-            deafenIndicator.style.display = isDeafened ? 'block' : 'none';
+        // Update status icons in voice card
+        const statusIcons = voiceCard.querySelector('.user-status-icons');
+        if (statusIcons) {
+            let iconsHtml = '';
+            if (isMuted) {
+                iconsHtml += '<span class="status-icon muted" title="Muted">🔇</span>';
+            }
+            if (isDeafened) {
+                iconsHtml += '<span class="status-icon deafened" title="Deafened">🔕</span>';
+            }
+            statusIcons.innerHTML = iconsHtml;
         }
     }
 }
@@ -1009,6 +1036,161 @@ async function toggleDeafen() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ isDeafened, isMuted: isDeafened })
     });
+}
+
+/**
+ * Toggle video
+ */
+async function toggleVideo() {
+    if (!app.livekitVoice) {
+        showNotification('Voice not connected', 'error');
+        return;
+    }
+    
+    const videoBtn = app.elements.videoBtn;
+    if (!videoBtn) return;
+    
+    // Toggle video
+    const success = await app.livekitVoice.toggleVideo();
+    
+    if (success) {
+        const isVideoEnabled = app.livekitVoice.isVideoEnabled;
+        videoBtn.classList.toggle('active', isVideoEnabled);
+        videoBtn.querySelector('.icon-video')?.classList.toggle('hidden', isVideoEnabled);
+        videoBtn.querySelector('.icon-video-off')?.classList.toggle('hidden', !isVideoEnabled);
+        
+        // Update local video preview in video grid
+        if (isVideoEnabled && app.livekitVoice.localVideoTrack) {
+            addLocalVideoTile();
+        } else {
+            removeVideoTile(app.user.id);
+        }
+        
+        showNotification(isVideoEnabled ? '📹 Video enabled' : '📹 Video disabled', 'success');
+    }
+}
+
+/**
+ * Add local video tile to grid
+ */
+function addLocalVideoTile() {
+    if (!app.livekitVoice?.localVideoTrack) return;
+    
+    const videoGrid = app.elements.videoGrid;
+    if (!videoGrid) return;
+    
+    // Remove existing local tile
+    removeVideoTile(app.user.id);
+    
+    const tile = document.createElement('div');
+    tile.className = 'video-tile local';
+    tile.id = `video-tile-${app.user.id}`;
+    tile.dataset.participantId = app.user.id;
+    
+    const video = document.createElement('video');
+    video.id = `video-${app.user.id}`;
+    video.autoplay = true;
+    video.muted = true; // Local video is always muted
+    video.playsInline = true;
+    
+    // Attach the local video track
+    app.livekitVoice.localVideoTrack.attach(video);
+    
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'video-name';
+    nameLabel.textContent = `${app.user.name} (You)`;
+    
+    tile.appendChild(video);
+    tile.appendChild(nameLabel);
+    videoGrid.appendChild(tile);
+    
+    // Show video grid
+    videoGrid.classList.remove('hidden');
+    updateVideoGridLayout();
+}
+
+/**
+ * Add remote video tile to grid
+ */
+function addRemoteVideoTile(track, participant) {
+    const videoGrid = app.elements.videoGrid;
+    if (!videoGrid) return;
+    
+    // Remove existing tile for this participant
+    removeVideoTile(participant.identity);
+    
+    const tile = document.createElement('div');
+    tile.className = 'video-tile';
+    tile.id = `video-tile-${participant.identity}`;
+    tile.dataset.participantId = participant.identity;
+    
+    const video = document.createElement('video');
+    video.id = `video-${participant.identity}`;
+    video.autoplay = true;
+    video.playsInline = true;
+    
+    // Attach the remote video track
+    track.attach(video);
+    
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'video-name';
+    nameLabel.textContent = participant.name || participant.identity;
+    
+    tile.appendChild(video);
+    tile.appendChild(nameLabel);
+    videoGrid.appendChild(tile);
+    
+    // Show video grid
+    videoGrid.classList.remove('hidden');
+    updateVideoGridLayout();
+}
+
+/**
+ * Remove video tile from grid
+ */
+function removeVideoTile(participantId) {
+    const tile = document.getElementById(`video-tile-${participantId}`);
+    if (tile) {
+        const video = tile.querySelector('video');
+        if (video) {
+            // Detach tracks
+            video.srcObject = null;
+        }
+        tile.remove();
+    }
+    
+    // Hide grid if empty
+    const videoGrid = app.elements.videoGrid;
+    if (videoGrid && videoGrid.children.length === 0) {
+        videoGrid.classList.add('hidden');
+    }
+    
+    updateVideoGridLayout();
+}
+
+/**
+ * Update video grid layout based on number of participants
+ */
+function updateVideoGridLayout() {
+    const videoGrid = app.elements.videoGrid;
+    if (!videoGrid) return;
+    
+    const count = videoGrid.children.length;
+    
+    // Remove previous layout classes
+    videoGrid.classList.remove('grid-1', 'grid-2', 'grid-3', 'grid-4', 'grid-many');
+    
+    if (count === 0) {
+        videoGrid.classList.add('hidden');
+    } else if (count === 1) {
+        videoGrid.classList.add('grid-1');
+    } else if (count === 2) {
+        videoGrid.classList.add('grid-2');
+    } else if (count <= 4) {
+        videoGrid.classList.add('grid-4');
+    } else {
+        videoGrid.classList.add('grid-many');
+    }
 }
 
 /**
@@ -1337,6 +1519,18 @@ async function handleOutputDeviceChange() {
 }
 
 /**
+ * Handle video device change
+ */
+async function handleVideoDeviceChange() {
+    const deviceId = app.elements.videoDevice?.value;
+    
+    if (app.livekitVoice) {
+        await app.livekitVoice.changeVideoDevice(deviceId || null);
+        console.log('[Video] Camera changed to:', deviceId || 'default');
+    }
+}
+
+/**
  * Handle noise suppression toggle
  */
 async function handleNoiseSuppressionToggle() {
@@ -1480,7 +1674,61 @@ function openModal(modalName) {
         // Initialize noise settings values when opening settings modal
         if (modalName === 'settingsModal') {
             initNoiseSettings();
+            populateDevices();
         }
+    }
+}
+
+/**
+ * Populate audio and video device dropdowns
+ */
+async function populateDevices() {
+    try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        
+        // Populate microphones
+        const inputSelect = app.elements.inputDevice;
+        if (inputSelect) {
+            const currentValue = inputSelect.value;
+            inputSelect.innerHTML = '<option value="">Default Microphone</option>';
+            devices.filter(d => d.kind === 'audioinput').forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Microphone ${device.deviceId.slice(0, 8)}`;
+                inputSelect.appendChild(option);
+            });
+            inputSelect.value = currentValue;
+        }
+        
+        // Populate speakers
+        const outputSelect = app.elements.outputDevice;
+        if (outputSelect) {
+            const currentValue = outputSelect.value;
+            outputSelect.innerHTML = '<option value="">Default Speakers</option>';
+            devices.filter(d => d.kind === 'audiooutput').forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Speakers ${device.deviceId.slice(0, 8)}`;
+                outputSelect.appendChild(option);
+            });
+            outputSelect.value = currentValue;
+        }
+        
+        // Populate cameras
+        const videoSelect = app.elements.videoDevice;
+        if (videoSelect) {
+            const currentValue = videoSelect.value;
+            videoSelect.innerHTML = '<option value="">Default Camera</option>';
+            devices.filter(d => d.kind === 'videoinput').forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Camera ${device.deviceId.slice(0, 8)}`;
+                videoSelect.appendChild(option);
+            });
+            videoSelect.value = currentValue;
+        }
+    } catch (error) {
+        console.error('Failed to enumerate devices:', error);
     }
 }
 
