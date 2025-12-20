@@ -571,7 +571,7 @@ app.post('/api/users/register', (req, res) => {
     const user = {
         id: uuidv4(),
         name: name.trim(),
-        roomId: 'lobby',
+        roomId: null,  // No default room - user must select one
         isMuted: false,
         isDeafened: false,
         isSpeaking: false,
@@ -580,11 +580,7 @@ app.post('/api/users/register', (req, res) => {
     
     users.set(user.id, user);
     
-    // Add to lobby
-    const lobby = rooms.get('lobby');
-    if (lobby) {
-        lobby.users.add(user.id);
-    }
+    // Don't auto-add to lobby - user must select a channel
     
     res.status(201).json({
         id: user.id,

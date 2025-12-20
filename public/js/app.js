@@ -95,7 +95,7 @@ function cacheElements() {
         // Room password modal
         roomPasswordForm: document.getElementById('room-password-form'),
         roomPasswordRoomId: document.getElementById('room-password-room-id'),
-        roomPasswordJoinInput: document.getElementById('room-password-input'),
+        roomPasswordJoinInput: document.getElementById('join-room-password-input'),
         roomPasswordError: document.getElementById('room-password-error'),
         roomPasswordMessage: document.getElementById('room-password-message'),
         
@@ -281,11 +281,15 @@ async function handleLogin(e) {
         app.elements.loginModal.classList.remove('active');
         app.elements.mainApp.classList.remove('hidden');
         
-        // Join default room (lobby)
+        // If user came via invite link, join that room
+        // Otherwise, show room list for user to select (no auto-join)
         if (app.currentRoom) {
             joinRoom(app.currentRoom);
         } else {
-            joinRoom('lobby');
+            // User must select a channel - update UI to reflect no room
+            updateActiveRoom('No Channel');
+            updateVoiceGrid();
+            showNotification('Select a channel to join', 'info');
         }
         
     } catch (error) {
@@ -732,6 +736,19 @@ function updateActiveRoom(roomName) {
  */
 function updateVoiceGrid() {
     const grid = app.elements.voiceGrid;
+    
+    // Check if user is in a room
+    if (!app.user?.roomId) {
+        grid.innerHTML = `
+            <div class="voice-placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                <p>Select a channel to start talking</p>
+            </div>
+        `;
+        return;
+    }
     
     // Get users in current room
     const roomUsers = app.users.filter(u => u.roomId === app.user?.roomId);
