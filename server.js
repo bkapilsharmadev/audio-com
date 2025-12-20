@@ -18,6 +18,9 @@ const { v4: uuidv4 } = require('uuid');
 // LiveKit SDK for token generation
 const { AccessToken } = require('livekit-server-sdk');
 
+// Server access password (POC security)
+const SERVER_PASSWORD = process.env.SERVER_PASSWORD || 'audiocom2025';
+
 // Simple password hashing using crypto (no bcrypt dependency needed)
 function hashPassword(password) {
     return crypto.createHash('sha256').update(password).digest('hex');
@@ -568,7 +571,12 @@ app.get('/api/users/:id', (req, res) => {
 
 // Register user
 app.post('/api/users/register', (req, res) => {
-    const { name } = req.body;
+    const { name, serverPassword } = req.body;
+    
+    // Validate server password first
+    if (!serverPassword || serverPassword !== SERVER_PASSWORD) {
+        return res.status(401).json({ error: 'Invalid server password' });
+    }
     
     if (!name || name.trim().length === 0) {
         return res.status(400).json({ error: 'Username is required' });

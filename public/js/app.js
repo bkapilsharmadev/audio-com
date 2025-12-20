@@ -241,9 +241,15 @@ async function handleLogin(e) {
     e.preventDefault();
     
     const username = app.elements.usernameInput.value.trim();
+    const serverPassword = document.getElementById('server-password-input')?.value || '';
     
     if (!username) {
         showLoginError('Please enter a username');
+        return;
+    }
+    
+    if (!serverPassword) {
+        showLoginError('Please enter the server password');
         return;
     }
     
@@ -254,7 +260,7 @@ async function handleLogin(e) {
         const response = await fetch('/api/users/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: username })
+            body: JSON.stringify({ name: username, serverPassword })
         });
         
         const data = await response.json();
