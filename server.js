@@ -642,17 +642,39 @@ app.post('/api/users/:userId/join/:roomId', (req, res) => {
         }
     }
     
-    // Remove from current room
-    if (user.roomId) {
-        const currentRoom = rooms.get(user.roomId);
+    const previousRoomId = user.roomId;
+    
+    // Remove from current room and notify
+    if (previousRoomId) {
+        const currentRoom = rooms.get(previousRoomId);
         if (currentRoom) {
             currentRoom.users.delete(userId);
+            // Broadcast to users in previous room that this user left
+            broadcastToRoom(previousRoomId, {
+                type: 'user-left',
+                userId,
+                userName: user.name
+            });
         }
     }
     
     // Join new room
     room.users.add(userId);
     user.roomId = roomId;
+    
+    // Broadcast to users in new room that this user joined
+    broadcastToRoom(roomId, {
+        type: 'user-joined',
+        userId,
+        userName: user.name,
+        user: {
+            id: user.id,
+            name: user.name,
+            isMuted: user.isMuted,
+            isDeafened: user.isDeafened,
+            isSpeaking: user.isSpeaking
+        }
+    }, userId);  // Exclude the joining user from receiving this
     
     res.json({
         success: true,

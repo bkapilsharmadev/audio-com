@@ -348,6 +348,8 @@ async function connectToServer() {
         addUserToList(user);
         addUserToVoiceGrid(user);
         showNotification(`${user.name} joined`);
+        // Refresh room list to update user counts
+        loadRooms();
     };
     
     app.mumbleClient.onUserLeave = (user) => {
@@ -356,6 +358,8 @@ async function connectToServer() {
         if (user.name) {
             showNotification(`${user.name} left`);
         }
+        // Refresh room list to update user counts
+        loadRooms();
     };
     
     app.mumbleClient.onUserSpeaking = (user) => {
@@ -534,8 +538,9 @@ async function joinRoom(roomId, password = null) {
         // Close sidebar on mobile after joining room
         closeSidebar();
         
-        // Reload users for new room
+        // Reload users and rooms (for user counts)
         await loadUsers();
+        await loadRooms();
         
         // Update room list selection
         document.querySelectorAll('.room-item').forEach(item => {
@@ -614,6 +619,7 @@ async function handleRoomPasswordSubmit(e) {
         updateActiveRoom(data.roomName);
         closeSidebar();
         await loadUsers();
+        await loadRooms();  // Refresh room list for user counts
         
         document.querySelectorAll('.room-item').forEach(item => {
             item.classList.toggle('active', item.dataset.roomId === roomId);

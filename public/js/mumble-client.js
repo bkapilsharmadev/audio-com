@@ -162,14 +162,16 @@ class MumbleClient {
      * Handle user join event
      */
     handleUserJoin(message) {
-        const user = {
+        // Use the full user object from message if available, otherwise construct from fields
+        const user = message.user || {
             id: message.userId,
             name: message.userName,
             isSpeaking: false,
-            isMuted: false
+            isMuted: false,
+            isDeafened: false
         };
         
-        this.users.set(message.userId, user);
+        this.users.set(user.id || message.userId, user);
         this.onUserJoin?.(user);
     }
 
