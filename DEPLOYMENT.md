@@ -54,12 +54,12 @@ Your Node server defaults to these values if not provided, but for production yo
 Your current [docker-compose.yml](docker-compose.yml) starts LiveKit with:
 
 ```yaml
-command: --dev --config /etc/livekit/livekit.conf --node-ip 192.168.1.4
+command: --dev --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-139.59.28.92}
 ```
 
 In cloud hosting, this **must not** be your home LAN IP. Use the VM’s public IPv4 (or an address LiveKit should advertise for ICE candidates).
 
-On a server with a public IP, set it to that public IP.
+On a server with a public IP, set it to that public IP. You can do this by exporting `LIVEKIT_NODE_IP` (recommended) or by editing `docker-compose.yml`.
 
 If ICE candidates are wrong, clients will connect to signaling but audio will fail.
 
@@ -143,7 +143,7 @@ EOF
 
 Edit [docker-compose.yml](docker-compose.yml) and set the correct `--node-ip`.
 
-- Replace `192.168.1.4` with your VM public IPv4
+- Set `LIVEKIT_NODE_IP` to your VM public IPv4 (recommended)
 
 Then start LiveKit:
 

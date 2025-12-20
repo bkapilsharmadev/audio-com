@@ -3,7 +3,7 @@ services:
   livekit:
     image: livekit/livekit-server:latest
     container_name: livekit
-    command: --dev --config /etc/livekit/livekit.conf --node-ip 192.168.1.4
+    command: --dev --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-139.59.28.92}
     ports:
       - "7880:7880"   # HTTP/WebSocket
       - "7881:7881"   # RTC over TCP
