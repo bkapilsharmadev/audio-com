@@ -46,6 +46,7 @@ function cacheElements() {
         loginModal: document.getElementById('login-modal'),
         createRoomModal: document.getElementById('create-room-modal'),
         settingsModal: document.getElementById('settings-modal'),
+        roomPasswordModal: document.getElementById('room-password-modal'),
         mainApp: document.getElementById('main-app'),
         
         // Login
@@ -88,7 +89,15 @@ function cacheElements() {
         createRoomForm: document.getElementById('create-room-form'),
         roomNameInput: document.getElementById('room-name-input'),
         roomDescriptionInput: document.getElementById('room-description-input'),
+        roomPasswordInput: document.getElementById('room-password-input'),
         roomMaxUsers: document.getElementById('room-max-users'),
+        
+        // Room password modal
+        roomPasswordForm: document.getElementById('room-password-form'),
+        roomPasswordRoomId: document.getElementById('room-password-room-id'),
+        roomPasswordJoinInput: document.getElementById('room-password-input'),
+        roomPasswordError: document.getElementById('room-password-error'),
+        roomPasswordMessage: document.getElementById('room-password-message'),
         
         // Settings
         settingsBtn: document.getElementById('settings-btn'),
@@ -158,6 +167,9 @@ function setupEventListeners() {
     // Create room
     app.elements.createRoomBtn.addEventListener('click', () => openModal('createRoomModal'));
     app.elements.createRoomForm.addEventListener('submit', handleCreateRoom);
+    
+    // Room password
+    app.elements.roomPasswordForm?.addEventListener('submit', handleRoomPasswordSubmit);
     
     // Settings
     app.elements.settingsBtn.addEventListener('click', () => openModal('settingsModal'));
@@ -392,12 +404,20 @@ function renderRoomList() {
         li.className = `room-item ${room.id === app.user?.roomId ? 'active' : ''}`;
         li.dataset.roomId = room.id;
         
+        // Show lock icon for password-protected rooms
+        const lockIcon = room.isPasswordProtected ? `
+            <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px; color: var(--accent); margin-left: 4px;">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+        ` : '';
+        
         li.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
             <div class="room-item-info">
-                <span class="room-item-name">${escapeHtml(room.name)}</span>
+                <span class="room-item-name">${escapeHtml(room.name)}${lockIcon}</span>
                 <span class="room-item-users">${room.userCount} users</span>
             </div>
         `;
@@ -482,15 +502,22 @@ function updateUserCount() {
 /**
  * Join a room
  */
-async function joinRoom(roomId) {
+async function joinRoom(roomId, password = null) {
     try {
         const response = await fetch(`/api/users/${app.user.id}/join/${roomId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
         });
         
         const data = await response.json();
         
         if (!response.ok) {
+            // If password required, show password modal
+            if (data.requiresPassword || response.status === 401) {
+                showPasswordModal(roomId, data.roomName || 'this room');
+                return;
+            }
             throw new Error(data.error);
         }
         
@@ -520,9 +547,83 @@ async function joinRoom(roomId) {
         // Initialize LiveKit voice for this room
         initializeLiveKitVoice(roomId);
         
+        showNotification(`Joined ${data.roomName}`, 'success');
+        
     } catch (error) {
         console.error('Failed to join room:', error);
         showNotification(error.message, 'error');
+    }
+}
+
+/**
+ * Show password modal for protected room
+ */
+function showPasswordModal(roomId, roomName) {
+    const modal = app.elements.roomPasswordModal;
+    if (!modal) return;
+    
+    // Reset modal state
+    app.elements.roomPasswordRoomId.value = roomId;
+    app.elements.roomPasswordJoinInput.value = '';
+    app.elements.roomPasswordError.textContent = '';
+    app.elements.roomPasswordMessage.textContent = `Enter the password to join "${roomName}".`;
+    
+    modal.classList.add('active');
+    app.elements.roomPasswordJoinInput.focus();
+}
+
+/**
+ * Handle room password form submission
+ */
+async function handleRoomPasswordSubmit(e) {
+    e.preventDefault();
+    
+    const roomId = app.elements.roomPasswordRoomId.value;
+    const password = app.elements.roomPasswordJoinInput.value;
+    
+    if (!password) {
+        app.elements.roomPasswordError.textContent = 'Please enter the password';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/users/${app.user.id}/join/${roomId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            app.elements.roomPasswordError.textContent = data.error || 'Incorrect password';
+            return;
+        }
+        
+        // Success - close modal and complete join
+        closeAllModals();
+        
+        // Update state
+        app.user.roomId = roomId;
+        
+        // Update UI
+        updateActiveRoom(data.roomName);
+        closeSidebar();
+        await loadUsers();
+        
+        document.querySelectorAll('.room-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.roomId === roomId);
+        });
+        
+        app.mumbleClient?.joinChannel(roomId);
+        updateVoiceGrid();
+        initializeLiveKitVoice(roomId);
+        
+        showNotification(`Joined ${data.roomName}`, 'success');
+        
+    } catch (error) {
+        console.error('Failed to join room with password:', error);
+        app.elements.roomPasswordError.textContent = 'Failed to join room';
     }
 }
 
@@ -907,6 +1008,7 @@ async function handleCreateRoom(e) {
     
     const name = app.elements.roomNameInput.value.trim();
     const description = app.elements.roomDescriptionInput.value.trim();
+    const password = app.elements.roomPasswordInput?.value?.trim() || '';
     const maxUsers = parseInt(app.elements.roomMaxUsers.value) || 25;
     
     if (!name) return;
@@ -915,7 +1017,7 @@ async function handleCreateRoom(e) {
         const response = await fetch('/api/rooms', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, description, maxUsers })
+            body: JSON.stringify({ name, description, password, maxUsers })
         });
         
         const data = await response.json();
@@ -930,11 +1032,14 @@ async function handleCreateRoom(e) {
         // Reload rooms
         await loadRooms();
         
-        // Join new room
-        joinRoom(data.id);
+        // Join new room (no password needed since we just created it)
+        joinRoom(data.id, password);
         
         // Reset form
         app.elements.createRoomForm.reset();
+        
+        const protectedMsg = data.isPasswordProtected ? ' (password protected)' : '';
+        showNotification(`Room "${data.name}" created${protectedMsg}`, 'success');
         
     } catch (error) {
         console.error('Failed to create room:', error);

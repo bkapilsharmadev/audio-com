@@ -10,12 +10,22 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
+const crypto = require('crypto');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
 // LiveKit SDK for token generation
 const { AccessToken } = require('livekit-server-sdk');
+
+// Simple password hashing using crypto (no bcrypt dependency needed)
+function hashPassword(password) {
+    return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password, hash) {
+    return hashPassword(password) === hash;
+}
 
 const app = express();
 let server;
@@ -232,6 +242,8 @@ function initializeDefaultRooms() {
         name: 'Lobby',
         description: 'Main lobby - welcome!',
         isPrivate: false,
+        isPasswordProtected: false,
+        password: null,
         maxUsers: 100,
         users: new Set(),
         createdAt: new Date()
@@ -242,6 +254,8 @@ function initializeDefaultRooms() {
         name: 'General',
         description: 'General discussion',
         isPrivate: false,
+        isPasswordProtected: false,
+        password: null,
         maxUsers: 50,
         users: new Set(),
         createdAt: new Date()
@@ -252,6 +266,8 @@ function initializeDefaultRooms() {
         name: 'Gaming',
         description: 'Voice chat for gamers',
         isPrivate: false,
+        isPasswordProtected: false,
+        password: null,
         maxUsers: 25,
         users: new Set(),
         createdAt: new Date()
@@ -375,7 +391,8 @@ app.get('/api/rooms', (req, res) => {
             name: room.name,
             description: room.description,
             userCount: room.users.size,
-            maxUsers: room.maxUsers
+            maxUsers: room.maxUsers,
+            isPasswordProtected: room.isPasswordProtected || false
         }));
     res.json(roomList);
 });
@@ -404,7 +421,7 @@ app.get('/api/rooms/:id', (req, res) => {
 
 // Create new room
 app.post('/api/rooms', (req, res) => {
-    const { name, description, isPrivate, maxUsers } = req.body;
+    const { name, description, isPrivate, maxUsers, password } = req.body;
     
     if (!name || name.trim().length === 0) {
         return res.status(400).json({ error: 'Room name is required' });
@@ -416,11 +433,15 @@ app.post('/api/rooms', (req, res) => {
         return res.status(409).json({ error: 'Room already exists' });
     }
     
+    const hasPassword = password && password.trim().length > 0;
+    
     const room = {
         id,
         name: name.trim(),
         description: description || '',
         isPrivate: isPrivate || false,
+        isPasswordProtected: hasPassword,
+        password: hasPassword ? hashPassword(password.trim()) : null,
         maxUsers: maxUsers || 25,
         users: new Set(),
         createdAt: new Date()
@@ -428,11 +449,14 @@ app.post('/api/rooms', (req, res) => {
     
     rooms.set(id, room);
     
+    console.log(`✓ Room created: ${room.name}${hasPassword ? ' (password protected)' : ''}`);
+    
     res.status(201).json({
         id: room.id,
         name: room.name,
         description: room.description,
         isPrivate: room.isPrivate,
+        isPasswordProtected: room.isPasswordProtected,
         maxUsers: room.maxUsers
     });
 });
@@ -570,9 +594,22 @@ app.post('/api/users/register', (req, res) => {
     });
 });
 
+// Check if room requires password
+app.get('/api/rooms/:roomId/requires-password', (req, res) => {
+    const room = rooms.get(req.params.roomId);
+    if (!room) {
+        return res.status(404).json({ error: 'Room not found' });
+    }
+    res.json({
+        requiresPassword: room.isPasswordProtected || false,
+        roomName: room.name
+    });
+});
+
 // User joins room
 app.post('/api/users/:userId/join/:roomId', (req, res) => {
     const { userId, roomId } = req.params;
+    const { password } = req.body || {};
     
     const user = users.get(userId);
     if (!user) {
@@ -592,6 +629,21 @@ app.post('/api/users/:userId/join/:roomId', (req, res) => {
     // Check private room access
     if (room.isPrivate && room.allowedUsers && !room.allowedUsers.has(userId)) {
         return res.status(403).json({ error: 'Access denied to private room' });
+    }
+    
+    // Check password if room is protected
+    if (room.isPasswordProtected) {
+        if (!password) {
+            return res.status(401).json({ 
+                error: 'Password required',
+                requiresPassword: true,
+                roomName: room.name
+            });
+        }
+        
+        if (!verifyPassword(password, room.password)) {
+            return res.status(401).json({ error: 'Incorrect password' });
+        }
     }
     
     // Remove from current room
