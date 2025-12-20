@@ -446,8 +446,8 @@ function renderUserList() {
     const userList = app.elements.userList;
     userList.innerHTML = '';
     
-    // Filter users in current room
-    const roomUsers = app.users.filter(u => u.roomId === app.user?.roomId);
+    // Filter users in current room (only show users who have joined a room)
+    const roomUsers = app.users.filter(u => u.roomId && u.roomId === app.currentRoom);
     
     app.elements.userCount.textContent = roomUsers.length;
     
@@ -862,6 +862,8 @@ function updateUserSpeakingState(userId, isSpeaking) {
  * Update user muted/deafened state in UI
  */
 function updateUserMutedState(userId, isMuted, isDeafened) {
+    console.log('[UI] Updating mute state for user:', userId, 'muted:', isMuted, 'deafened:', isDeafened);
+    
     // Find user in app.users array
     const user = app.users.find(u => u.id === userId);
     if (user) {
@@ -869,23 +871,35 @@ function updateUserMutedState(userId, isMuted, isDeafened) {
         user.isDeafened = isDeafened;
     }
     
-    // Update in user list
+    // Update in user list - rebuild the status icons
     const userListItem = document.querySelector(`.user-item[data-user-id="${userId}"]`);
     if (userListItem) {
-        const muteIcon = userListItem.querySelector('.user-status .mute-icon');
-        const deafenIcon = userListItem.querySelector('.user-status .deafen-icon');
-        
-        if (muteIcon) {
-            muteIcon.style.display = isMuted ? 'inline' : 'none';
+        // Update status indicator (dot)
+        const statusIndicator = userListItem.querySelector('.status-indicator');
+        if (statusIndicator) {
+            statusIndicator.className = `status-indicator ${isMuted ? 'muted' : 'online'}`;
         }
-        if (deafenIcon) {
-            deafenIcon.style.display = isDeafened ? 'inline' : 'none';
+        
+        // Rebuild the status icons container
+        const statusContainer = userListItem.querySelector('.user-item-status');
+        if (statusContainer) {
+            let iconsHtml = '';
+            if (isMuted) {
+                iconsHtml += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mute-icon"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/></svg>';
+            }
+            if (isDeafened) {
+                iconsHtml += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="deafen-icon"><line x1="1" y1="1" x2="23" y2="23"/><path d="M3 18v-6a9 9 0 0 1 14.77-6.94"/></svg>';
+            }
+            statusContainer.innerHTML = iconsHtml;
         }
     }
     
     // Update in voice grid
     const voiceCard = document.querySelector(`.voice-card[data-user-id="${userId}"]`);
     if (voiceCard) {
+        voiceCard.classList.toggle('muted', isMuted);
+        voiceCard.classList.toggle('deafened', isDeafened);
+        
         const muteIndicator = voiceCard.querySelector('.mute-indicator');
         const deafenIndicator = voiceCard.querySelector('.deafen-indicator');
         

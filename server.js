@@ -527,7 +527,19 @@ app.delete('/api/rooms/:id', (req, res) => {
 
 // List all users
 app.get('/api/users', (req, res) => {
-    const userList = Array.from(users.values()).map(user => ({
+    const { roomId } = req.query;
+    
+    let userList = Array.from(users.values());
+    
+    // Filter by roomId if provided, otherwise only return users who have joined a room
+    if (roomId) {
+        userList = userList.filter(user => user.roomId === roomId);
+    } else {
+        // Only return users who are in a room (not just registered)
+        userList = userList.filter(user => user.roomId);
+    }
+    
+    const result = userList.map(user => ({
         id: user.id,
         name: user.name,
         roomId: user.roomId,
@@ -536,7 +548,7 @@ app.get('/api/users', (req, res) => {
         isSpeaking: user.isSpeaking,
         connectedAt: user.connectedAt
     }));
-    res.json(userList);
+    res.json(result);
 });
 
 // Get specific user
