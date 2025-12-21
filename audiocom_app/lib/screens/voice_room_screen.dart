@@ -294,22 +294,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                 )
               else
                 _buildAvatarCircle(user),
-              // Deafened indicator (bottom right) - takes priority over muted
-              if (user.isDeafened)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.shade700,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.headset_off, size: 12, color: Colors.white),
-                  ),
-                )
               // Muted indicator (bottom right)
-              else if (user.isMuted)
+              if (user.isMuted)
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -320,6 +306,21 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.mic_off, size: 12, color: Colors.white),
+                  ),
+                ),
+              // Deafened indicator (bottom left when muted, bottom right when only deafened)
+              if (user.isDeafened)
+                Positioned(
+                  left: user.isMuted ? 0 : null,  // Move to left if also muted
+                  right: user.isMuted ? null : 0, // Stay right if only deafened
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade700,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.headset_off, size: 12, color: Colors.white),
                   ),
                 ),
               // Network status indicator (top right) - only show if not good
