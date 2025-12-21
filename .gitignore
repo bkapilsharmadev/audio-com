@@ -165,3 +165,6 @@ audiocom_app/ios/Flutter/ephemeral/
 audiocom_app/ios/Runner.xcworkspace/xcshareddata/
 *.apk
 *.aab
+
+# Session data (local development)
+data/

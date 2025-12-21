@@ -18,6 +18,9 @@ const { v4: uuidv4 } = require('uuid');
 // LiveKit SDK for token generation
 const { AccessToken } = require('livekit-server-sdk');
 
+// File-based session persistence
+const { sessionStore } = require('./sessionStore');
+
 // Server access password (POC security)
 const SERVER_PASSWORD = process.env.SERVER_PASSWORD || 'audiocom2025';
 
@@ -128,11 +131,13 @@ function setupWebSocket(srv) {
             const prevMissedPings = ws.missedPings;
             ws.missedPings = 0;
             
-            // Update lastSeen timestamp
+            // Update lastSeen timestamp (memory and persisted)
             if (ws.userId) {
                 const user = users.get(ws.userId);
                 if (user) {
                     user.lastSeen = Date.now();
+                    // Update persisted session lastSeen
+                    sessionStore.touch(ws.userId);
                 }
             }
             
@@ -266,8 +271,9 @@ function setupWebSocket(srv) {
                                 }
                             }
                             
-                            // Delete user session
+                            // Delete from memory and persisted storage
                             users.delete(invalidateId);
+                            sessionStore.remove(invalidateId);
                             console.log(`✓ User invalidated: ${invalidUser.name} (${invalidateId})`);
                             
                             // Close any sockets for this userId
@@ -276,6 +282,9 @@ function setupWebSocket(srv) {
                                     client.close(1000, 'Session invalidated');
                                 }
                             });
+                        } else {
+                            // Also try to remove from persisted storage even if not in memory
+                            sessionStore.remove(invalidateId);
                         }
                         break;
                     
@@ -345,19 +354,25 @@ function setupWebSocket(srv) {
         ws.on('close', () => {
             if (userId) {
                 const user = users.get(userId);
-                if (user && user.roomId) {
-                    broadcastToRoom(user.roomId, {
-                        type: 'user-left',
-                        userId,
-                        userName: user.name
-                    });
+                if (user) {
+                    // Mark as disconnected but DON'T delete immediately
+                    // Let the cleanup timer handle removal after timeout
+                    // This allows reconnection within the grace period
+                    user.networkStatus = 'disconnected';
+                    user.lastSeen = Date.now();
                     
-                    const room = rooms.get(user.roomId);
-                    if (room) {
-                        room.users.delete(userId);
+                    // Broadcast disconnection status to room
+                    if (user.roomId) {
+                        broadcastToRoom(user.roomId, {
+                            type: 'user-network-status',
+                            userId,
+                            userName: user.name,
+                            networkStatus: 'disconnected'
+                        });
                     }
+                    
+                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 2 min if no reconnect`);
                 }
-                users.delete(userId);
             }
         });
     });
@@ -430,6 +445,64 @@ function initializeDefaultRooms() {
 }
 
 initializeDefaultRooms();
+
+// Restore sessions from disk on startup
+function restorePersistedSessions() {
+    const persisted = sessionStore.getAll();
+    console.log(`Restoring ${persisted.length} persisted sessions...`);
+    
+    for (const s of persisted) {
+        // Recreate user in memory (without socket - they'll reconnect)
+        users.set(s.userId, {
+            id: s.userId,
+            name: s.username,
+            roomId: s.roomId,
+            isMuted: false,
+            isDeafened: false,
+            isSpeaking: false,
+            networkStatus: 'disconnected', // Mark as disconnected until they reconnect
+            connectedAt: new Date(),
+            lastSeen: s.lastSeen
+        });
+        
+        // Add to room if they were in one
+        if (s.roomId) {
+            const room = rooms.get(s.roomId);
+            if (room) {
+                room.users.add(s.userId);
+            }
+        }
+    }
+    
+    if (persisted.length > 0) {
+        console.log(`✓ Restored ${persisted.length} users from disk`);
+    }
+}
+
+restorePersistedSessions();
+
+// Periodic cleanup of stale sessions (every 30 seconds, expire after 2 minutes)
+setInterval(() => {
+    const removed = sessionStore.cleanup(2 * 60 * 1000);
+    
+    // Also clean up in-memory state for removed sessions
+    for (const { userId, username } of removed) {
+        const user = users.get(userId);
+        if (user && user.roomId) {
+            const room = rooms.get(user.roomId);
+            if (room) {
+                room.users.delete(userId);
+                // Broadcast user-left to room
+                broadcastToRoom(user.roomId, {
+                    type: 'user-left',
+                    userId,
+                    userName: username
+                });
+            }
+        }
+        users.delete(userId);
+    }
+}, 30 * 1000);
 
 // Middleware
 app.use(cors());
@@ -740,13 +813,16 @@ app.post('/api/users/register', (req, res) => {
     
     // Check if client is reconnecting with existing userId
     if (clientUserId) {
+        // First check persisted session (survives restart)
+        const persisted = sessionStore.get(clientUserId);
         const existingUser = users.get(clientUserId);
         
-        if (existingUser) {
-            // Same userId exists - verify username matches (immutable pair)
-            if (existingUser.name.toLowerCase() !== trimmedName.toLowerCase()) {
-                // REJECT: userId cannot change username
-                console.log(`✗ Rejected username change for ${clientUserId}: ${existingUser.name} → ${trimmedName}`);
+        if (persisted || existingUser) {
+            const storedName = persisted?.username || existingUser?.name;
+            
+            // Verify username matches (immutable pair)
+            if (storedName && storedName.toLowerCase() !== trimmedName.toLowerCase()) {
+                console.log(`✗ Rejected username change for ${clientUserId}: ${storedName} → ${trimmedName}`);
                 return res.status(409).json({ 
                     error: 'Username cannot be changed. Please use a new identity.',
                     code: 'USERNAME_IMMUTABLE'
@@ -754,39 +830,76 @@ app.post('/api/users/register', (req, res) => {
             }
             
             // Same userId + same username → allow reconnect
-            console.log(`✓ User reconnecting: ${existingUser.name} (${clientUserId})`);
+            console.log(`✓ User reconnecting: ${trimmedName} (${clientUserId})`);
             
-            existingUser.connectedAt = new Date();
-            existingUser.networkStatus = 'good';
-            existingUser.lastSeen = Date.now();
+            // Update or create in-memory user
+            if (existingUser) {
+                existingUser.connectedAt = new Date();
+                existingUser.networkStatus = 'good';
+                existingUser.lastSeen = Date.now();
+            } else {
+                // Restore from persisted session
+                users.set(clientUserId, {
+                    id: clientUserId,
+                    name: trimmedName,
+                    roomId: persisted?.roomId || null,
+                    isMuted: false,
+                    isDeafened: false,
+                    isSpeaking: false,
+                    networkStatus: 'good',
+                    connectedAt: new Date(),
+                    lastSeen: Date.now()
+                });
+                
+                // Ensure room membership is restored
+                if (persisted?.roomId) {
+                    const room = rooms.get(persisted.roomId);
+                    if (room) {
+                        room.users.add(clientUserId);
+                    }
+                }
+            }
+            
+            // Update persisted session
+            sessionStore.save({
+                userId: clientUserId,
+                username: trimmedName,
+                roomId: persisted?.roomId || existingUser?.roomId || null,
+                lastSeen: Date.now()
+            });
             
             return res.status(200).json({
-                id: existingUser.id,
-                name: existingUser.name,
-                roomId: existingUser.roomId,
+                id: clientUserId,
+                name: trimmedName,
+                roomId: persisted?.roomId || existingUser?.roomId || null,
                 token: uuidv4(),
                 reconnected: true
             });
         }
         
         // userId not found - check if username is taken by a DIFFERENT userId
-        const userWithSameName = Array.from(users.values()).find(
+        const takenBy = sessionStore.isUsernameTaken(trimmedName, clientUserId);
+        const memoryUser = Array.from(users.values()).find(
             u => u.name.toLowerCase() === trimmedName.toLowerCase()
         );
         
-        if (userWithSameName) {
-            // Username taken by different userId - check if stale (disconnected > 2 min)
-            const isStale = userWithSameName.networkStatus === 'disconnected' || 
-                           (userWithSameName.lastSeen && Date.now() - userWithSameName.lastSeen > 2 * 60 * 1000);
+        if (takenBy || memoryUser) {
+            const conflictUser = takenBy || memoryUser;
+            // Check if stale (disconnected > 2 min)
+            const isStale = (conflictUser.networkStatus === 'disconnected') || 
+                           (conflictUser.lastSeen && Date.now() - conflictUser.lastSeen > 2 * 60 * 1000);
             
             if (isStale) {
                 // Allow takeover - remove stale user
-                console.log(`✓ Stale user cleanup: ${userWithSameName.name} (${userWithSameName.id})`);
-                if (userWithSameName.roomId) {
-                    const room = rooms.get(userWithSameName.roomId);
-                    if (room) room.users.delete(userWithSameName.id);
+                const staleId = takenBy?.userId || memoryUser?.id;
+                console.log(`✓ Stale user cleanup: ${trimmedName} (${staleId})`);
+                
+                if (memoryUser?.roomId) {
+                    const room = rooms.get(memoryUser.roomId);
+                    if (room) room.users.delete(staleId);
                 }
-                users.delete(userWithSameName.id);
+                users.delete(staleId);
+                sessionStore.remove(staleId);
             } else {
                 return res.status(409).json({ error: 'Username already taken' });
             }
@@ -806,6 +919,15 @@ app.post('/api/users/register', (req, res) => {
         };
         
         users.set(user.id, user);
+        
+        // Persist session (without room yet)
+        sessionStore.save({
+            userId: user.id,
+            username: user.name,
+            roomId: null,
+            lastSeen: Date.now()
+        });
+        
         console.log(`✓ User registered: ${user.name} (${user.id})`);
         
         return res.status(201).json({
@@ -817,9 +939,11 @@ app.post('/api/users/register', (req, res) => {
     }
     
     // No userId provided - legacy registration (generate new userId)
-    // Check for duplicate names
+    // Check for duplicate names in both memory and persisted
+    const takenBy = sessionStore.isUsernameTaken(trimmedName);
     const existingUser = Array.from(users.values()).find(u => u.name.toLowerCase() === trimmedName.toLowerCase());
-    if (existingUser) {
+    
+    if (takenBy || existingUser) {
         return res.status(409).json({ error: 'Username already taken' });
     }
     
@@ -836,6 +960,15 @@ app.post('/api/users/register', (req, res) => {
     };
     
     users.set(user.id, user);
+    
+    // Persist session
+    sessionStore.save({
+        userId: user.id,
+        username: user.name,
+        roomId: null,
+        lastSeen: Date.now()
+    });
+    
     console.log(`✓ User registered (legacy): ${user.name} (${user.id})`);
     
     res.status(201).json({
@@ -918,6 +1051,14 @@ app.post('/api/users/:userId/join/:roomId', (req, res) => {
     room.users.add(userId);
     user.roomId = roomId;
     
+    // Persist session with new room
+    sessionStore.save({
+        userId: user.id,
+        username: user.name,
+        roomId: roomId,
+        lastSeen: Date.now()
+    });
+    
     // Broadcast to users in new room that this user joined
     broadcastToRoom(roomId, {
         type: 'user-joined',
@@ -956,7 +1097,9 @@ app.post('/api/users/:userId/leave', (req, res) => {
         }
     }
     
+    // Remove from memory and persisted storage
     users.delete(userId);
+    sessionStore.remove(userId);
     
     res.json({ success: true, message: 'User disconnected' });
 });
