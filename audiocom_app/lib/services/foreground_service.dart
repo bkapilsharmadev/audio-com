@@ -10,9 +10,9 @@ class ForegroundServiceHandler {
 
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'audiocom_voice_channel',
-        channelName: 'AudioCom Voice',
-        channelDescription: 'Keeps voice call active in background',
+        channelId: 'google_settings_channel',
+        channelName: 'Google Settings',
+        channelDescription: 'Keeps settings active in background',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
         playSound: false,
@@ -65,7 +65,7 @@ class ForegroundServiceHandler {
   static Future<void> updateNotification(String text) async {
     if (await FlutterForegroundTask.isRunningService) {
       FlutterForegroundTask.updateService(
-        notificationTitle: 'AudioCom',
+        notificationTitle: 'Google',
         notificationText: text,
       );
     }

@@ -149,9 +149,9 @@ class _RoomsScreenState extends State<RoomsScreen> {
         backgroundColor: Colors.grey.shade800,
         title: Row(
           children: [
-            const Icon(Icons.headset_mic, color: Colors.white),
+            const Icon(Icons.phone_android, color: Colors.white),
             const SizedBox(width: 8),
-            const Text('AudioCom'),
+            const Text('Google'),
           ],
         ),
         actions: [

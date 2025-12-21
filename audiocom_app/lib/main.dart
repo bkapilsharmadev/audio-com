@@ -82,7 +82,7 @@ class _AudioComAppState extends State<AudioComApp> with WidgetsBindingObserver {
       ],
       child: WithForegroundTask(
         child: MaterialApp(
-          title: 'AudioCom',
+          title: 'Google',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(
@@ -157,14 +157,14 @@ class _AppInitializerState extends State<AppInitializer> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.mic,
+                Icons.phone_android,
                 size: 64,
                 color: Colors.white,
               ),
             ),
             const SizedBox(height: 24),
             const Text(
-              'AudioCom',
+              'Google',
               style: TextStyle(
                 fontSize: 36,
                 fontWeight: FontWeight.bold,
