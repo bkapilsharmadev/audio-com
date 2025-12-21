@@ -232,6 +232,7 @@ class WebSocketService {
           break;
 
         case 'user-network-status':
+          print('📨 WS received user-network-status: ${data['userId']} -> ${data['networkStatus']}');
           _userNetworkStatusController.add({
             'userId': data['userId'],
             'userName': data['userName'],

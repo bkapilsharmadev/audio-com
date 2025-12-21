@@ -15,8 +15,8 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
-// LiveKit SDK for token generation
-const { AccessToken } = require('livekit-server-sdk');
+// LiveKit SDK for token generation and webhooks
+const { AccessToken, WebhookReceiver } = require('livekit-server-sdk');
 
 // File-based session persistence
 const { sessionStore } = require('./sessionStore');
@@ -100,21 +100,13 @@ function setupWebSocket(srv) {
     }
 
     // Ping clients every 30 seconds and track network status
-    // We do NOT auto-kick users - only update their network status
+    // If too many pings are missed, forcibly close the connection
     const pingInterval = setInterval(() => {
         wss.clients.forEach((ws) => {
             if (ws.userId) {
                 ws.missedPings = (ws.missedPings || 0) + 1;
                 
-                // IMPORTANT: Update lastSeen even during missed pings
-                // This prevents session cleanup while we're still tracking the user
-                // Only stop updating when WS actually closes
                 const user = users.get(ws.userId);
-                if (user) {
-                    user.lastSeen = Date.now();
-                    sessionStore.touch(ws.userId);
-                }
-                
                 const newStatus = getNetworkStatus(ws.missedPings);
                 
                 // Broadcast status change to room members
@@ -131,6 +123,20 @@ function setupWebSocket(srv) {
                 
                 // Log ping with user info
                 console.log(`[PING] userId=${ws.userId} name=${user?.name || 'unknown'} missedPings=${ws.missedPings}`);
+                
+                // After 4+ missed pings (2+ minutes), forcibly close the dead connection
+                // This triggers ws.on('close') which handles proper cleanup
+                if (ws.missedPings >= 4) {
+                    console.log(`[PING] Terminating dead connection for user ${ws.userId} (${ws.missedPings} missed pings)`);
+                    ws.terminate();  // Force close - will trigger ws.on('close')
+                    return;  // Skip pinging this dead connection
+                }
+                
+                // Update lastSeen only for connections we're still tracking
+                if (user) {
+                    user.lastSeen = Date.now();
+                    sessionStore.touch(ws.userId);
+                }
             }
             ws.ping();
         });
@@ -710,6 +716,87 @@ app.post('/api/livekit/token', async (req, res) => {
     } catch (error) {
         console.error('Error generating LiveKit token:', error);
         res.status(500).json({ error: 'Failed to generate token' });
+    }
+});
+
+// LiveKit Webhook - receives events when participants join/leave/disconnect
+// This is the FASTEST way to detect network issues (1-5 seconds vs 60+ seconds for WebSocket ping)
+const webhookReceiver = new WebhookReceiver(LIVEKIT_API_KEY, LIVEKIT_API_SECRET);
+
+app.post('/api/livekit/webhook', express.raw({ type: 'application/webhook+json' }), async (req, res) => {
+    try {
+        // Verify webhook signature and parse event
+        const authHeader = req.get('Authorization');
+        const event = await webhookReceiver.receive(req.body, authHeader);
+        
+        console.log(`[LIVEKIT WEBHOOK] ${event.event} - participant: ${event.participant?.identity || 'N/A'} room: ${event.room?.name || 'N/A'}`);
+        
+        switch (event.event) {
+            case 'participant_disconnected':
+                // Media connection lost - typically fires 1-5 seconds after network drop
+                // This is the early warning - mark user as reconnecting
+                const disconnectedUserId = event.participant?.identity;
+                const disconnectedRoom = event.room?.name;
+                
+                if (disconnectedUserId && disconnectedRoom) {
+                    const user = users.get(disconnectedUserId);
+                    if (user && user.roomId === disconnectedRoom) {
+                        // Only update if not already marked
+                        if (user.networkStatus !== 'reconnecting' && user.networkStatus !== 'disconnected') {
+                            user.networkStatus = 'reconnecting';
+                            console.log(`[LIVEKIT] User ${user.name || disconnectedUserId} media disconnected - marking as reconnecting`);
+                            
+                            broadcastToRoom(disconnectedRoom, {
+                                type: 'user-network-status',
+                                userId: disconnectedUserId,
+                                userName: user.name,
+                                networkStatus: 'reconnecting'
+                            });
+                        }
+                    }
+                }
+                break;
+                
+            case 'participant_joined':
+                // Media connection established - user is back
+                const joinedUserId = event.participant?.identity;
+                const joinedRoom = event.room?.name;
+                
+                if (joinedUserId && joinedRoom) {
+                    const user = users.get(joinedUserId);
+                    if (user && user.roomId === joinedRoom) {
+                        // Only update if they were marked as having issues
+                        if (user.networkStatus !== 'good') {
+                            user.networkStatus = 'good';
+                            console.log(`[LIVEKIT] User ${user.name || joinedUserId} media reconnected - marking as good`);
+                            
+                            broadcastToRoom(joinedRoom, {
+                                type: 'user-network-status',
+                                userId: joinedUserId,
+                                userName: user.name,
+                                networkStatus: 'good'
+                            });
+                        }
+                    }
+                }
+                break;
+                
+            case 'participant_left':
+                // Participant explicitly left (or was removed)
+                // This could mean they're gone - but wait for WS to confirm
+                console.log(`[LIVEKIT] Participant left: ${event.participant?.identity}`);
+                break;
+                
+            case 'room_finished':
+                // Room closed - could clean up, but we'll let WS handle this
+                console.log(`[LIVEKIT] Room finished: ${event.room?.name}`);
+                break;
+        }
+        
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('[LIVEKIT WEBHOOK] Error processing webhook:', error);
+        res.sendStatus(400);
     }
 });
 

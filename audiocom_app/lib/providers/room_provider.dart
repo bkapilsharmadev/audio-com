@@ -231,10 +231,14 @@ class RoomProvider extends ChangeNotifier {
     _userNetworkStatusSub = _wsService.onUserNetworkStatus.listen((data) {
       final userId = data['userId'] as String;
       final networkStatus = data['networkStatus'] as String;
+      print('📡 Network status update received: userId=$userId status=$networkStatus');
       final index = _roomUsers.indexWhere((u) => u.id == userId);
       if (index >= 0) {
+        print('📡 Updating user ${_roomUsers[index].name} status to $networkStatus');
         _roomUsers[index] = _roomUsers[index].copyWith(networkStatus: networkStatus);
         notifyListeners();
+      } else {
+        print('⚠️ User $userId not found in roomUsers (count: ${_roomUsers.length})');
       }
     });
   }

@@ -10,6 +10,9 @@ services:
       - "7882:7882/udp"  # RTC over UDP
     volumes:
       - ./livekit.conf:/etc/livekit/livekit.conf:ro
+    # Make host.docker.internal work on Linux (maps to host's IP)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
 volumes: {}
