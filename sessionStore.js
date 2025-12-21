@@ -143,13 +143,19 @@ class FileSessionStore {
     /**
      * Clean up expired sessions
      * @param {number} expiryMs - Expiry time in milliseconds
+     * @param {Set<string>} activeUserIds - Set of userIds with active WebSocket connections (skip these)
      * @returns {string[]} - Array of removed userIds
      */
-    cleanup(expiryMs) {
+    cleanup(expiryMs, activeUserIds = new Set()) {
         const now = Date.now();
         const removed = [];
 
         for (const [userId, s] of this.sessions) {
+            // Skip users with active WebSocket connections - they're still being tracked
+            if (activeUserIds.has(userId)) {
+                continue;
+            }
+            
             if (now - s.lastSeen > expiryMs) {
                 this.sessions.delete(userId);
                 removed.push({ userId, username: s.username });

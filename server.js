@@ -106,8 +106,16 @@ function setupWebSocket(srv) {
             if (ws.userId) {
                 ws.missedPings = (ws.missedPings || 0) + 1;
                 
-                const newStatus = getNetworkStatus(ws.missedPings);
+                // IMPORTANT: Update lastSeen even during missed pings
+                // This prevents session cleanup while we're still tracking the user
+                // Only stop updating when WS actually closes
                 const user = users.get(ws.userId);
+                if (user) {
+                    user.lastSeen = Date.now();
+                    sessionStore.touch(ws.userId);
+                }
+                
+                const newStatus = getNetworkStatus(ws.missedPings);
                 
                 // Broadcast status change to room members
                 if (user && user.roomId && user.networkStatus !== newStatus) {
@@ -120,6 +128,9 @@ function setupWebSocket(srv) {
                     });
                     console.log(`User ${ws.userId} network status: ${newStatus} (${ws.missedPings} missed pings)`);
                 }
+                
+                // Log ping with user info
+                console.log(`[PING] userId=${ws.userId} name=${user?.name || 'unknown'} missedPings=${ws.missedPings}`);
             }
             ws.ping();
         });
@@ -141,6 +152,10 @@ function setupWebSocket(srv) {
             // Update lastSeen timestamp (memory and persisted)
             if (ws.userId) {
                 const user = users.get(ws.userId);
+                
+                // Log pong with user info
+                console.log(`[PONG] userId=${ws.userId} name=${user?.name || 'unknown'} prevMissedPings=${prevMissedPings}`);
+                
                 if (user) {
                     user.lastSeen = Date.now();
                     // Update persisted session lastSeen
@@ -533,7 +548,15 @@ restorePersistedSessions();
 // Periodic cleanup of stale sessions (every 10 seconds, expire after 60 seconds)
 // 60 seconds gives enough time for mobile network reconnections
 setInterval(() => {
-    const removed = sessionStore.cleanup(60 * 1000);
+    // Get set of userIds that have active WebSocket connections
+    const activeWsUserIds = new Set();
+    if (globalWss) {
+        globalWss.clients.forEach(ws => {
+            if (ws.userId) activeWsUserIds.add(ws.userId);
+        });
+    }
+    
+    const removed = sessionStore.cleanup(60 * 1000, activeWsUserIds);
     
     // Also clean up in-memory state for removed sessions
     for (const { userId, username } of removed) {
@@ -552,7 +575,7 @@ setInterval(() => {
         }
         users.delete(userId);
     }
-}, 5 * 1000);
+}, 10 * 1000);
 
 // Middleware
 app.use(cors());
