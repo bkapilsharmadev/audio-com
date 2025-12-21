@@ -112,6 +112,7 @@ class AudioProvider extends ChangeNotifier {
       _currentRoomName = displayName;
       _isInVoiceChannel = true;
       _isMuted = true;  // Start muted
+      _isReconnecting = false;
       _isConnecting = false;
       
       // Keep screen on during call
@@ -147,6 +148,7 @@ class AudioProvider extends ChangeNotifier {
     _isInVoiceChannel = false;
     _isMuted = true;
     _isDeafened = false;
+    _isReconnecting = false;
     _currentRoomId = null;
     _currentUserId = null;
     _currentUserName = null;
@@ -263,15 +265,17 @@ class AudioProvider extends ChangeNotifier {
         WakelockPlus.disable();
         
         notifyListeners();
-      } else if (isConnected && !_isInVoiceChannel && _currentRoomId != null) {
-        // Reconnected successfully
-        _isInVoiceChannel = true;
+      } 
+      
+      if (isConnected) {
+        // Connected (initial or reconnected)
         _isReconnecting = false;
         _error = null;
-        
-        // Notify other users we're back online
-        _wsService.sendNetworkStatus('good');
-        
+        if (_currentRoomId != null) {
+          _isInVoiceChannel = true;
+          // Notify other users we're back online
+          _wsService.sendNetworkStatus('good');
+        }
         notifyListeners();
       }
     });
@@ -285,7 +289,7 @@ class AudioProvider extends ChangeNotifier {
         _wsService.sendNetworkStatus('weak');
       } else {
         _error = null;
-        // Will get 'good' status from connection state listener when fully reconnected
+        _isReconnecting = false;
       }
       notifyListeners();
     });
