@@ -782,9 +782,29 @@ app.post('/api/livekit/webhook', express.raw({ type: 'application/webhook+json' 
                 break;
                 
             case 'participant_left':
-                // Participant explicitly left (or was removed)
-                // This could mean they're gone - but wait for WS to confirm
-                console.log(`[LIVEKIT] Participant left: ${event.participant?.identity}`);
+            case 'participant_disconnected':
+                // Media connection lost - fires when participant leaves LiveKit room
+                // This is the early warning signal for network issues
+                const leftUserId = event.participant?.identity;
+                const leftRoom = event.room?.name;
+                
+                if (leftUserId && leftRoom) {
+                    const user = users.get(leftUserId);
+                    if (user && user.roomId === leftRoom) {
+                        // Only update if not already marked
+                        if (user.networkStatus !== 'reconnecting' && user.networkStatus !== 'disconnected') {
+                            user.networkStatus = 'reconnecting';
+                            console.log(`[LIVEKIT] User ${user.name || leftUserId} left LiveKit room - marking as reconnecting`);
+                            
+                            broadcastToRoom(leftRoom, {
+                                type: 'user-network-status',
+                                userId: leftUserId,
+                                userName: user.name,
+                                networkStatus: 'reconnecting'
+                            });
+                        }
+                    }
+                }
                 break;
                 
             case 'room_finished':
