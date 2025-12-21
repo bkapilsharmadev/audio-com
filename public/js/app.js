@@ -812,6 +812,33 @@ async function initializeLiveKitVoice(roomId) {
             }
         };
         
+        // Handle mobile mic suspension (background mode)
+        app.livekitVoice.onMicSuspended = () => {
+            console.warn('📱 Mic suspended - showing notification');
+            showMicSuspendedBanner(true);
+            showNotification('🎤 Microphone paused (app in background)', 'warning');
+            
+            // Update mute button to show suspended state
+            const muteBtn = app.elements.muteBtn;
+            if (muteBtn) {
+                muteBtn.classList.add('suspended');
+                muteBtn.title = 'Microphone suspended - tap to recover';
+            }
+        };
+        
+        app.livekitVoice.onMicResumed = () => {
+            console.log('📱 Mic resumed');
+            showMicSuspendedBanner(false);
+            showNotification('🎤 Microphone recovered', 'success');
+            
+            // Update mute button
+            const muteBtn = app.elements.muteBtn;
+            if (muteBtn) {
+                muteBtn.classList.remove('suspended');
+                muteBtn.title = app.livekitVoice?.isMuted ? 'Unmute' : 'Mute';
+            }
+        };
+        
         // Connect to LiveKit room
         const connected = await app.livekitVoice.connect(roomId, app.user.id, app.user.name);
         
@@ -2193,7 +2220,84 @@ function showLoginError(message) {
  */
 function showNotification(message, type = 'info') {
     console.log(`[${type.toUpperCase()}] ${message}`);
-    // Could implement toast notifications here
+    
+    // Create toast notification
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.innerHTML = `
+        <span>${message}</span>
+        <button class="toast-close">&times;</button>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Animate in
+    requestAnimationFrame(() => toast.classList.add('show'));
+    
+    // Close button
+    toast.querySelector('.toast-close').onclick = () => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    };
+    
+    // Auto dismiss
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 4000);
+}
+
+/**
+ * Show/hide mic suspended banner
+ */
+function showMicSuspendedBanner(show) {
+    let banner = document.getElementById('mic-suspended-banner');
+    
+    if (show) {
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'mic-suspended-banner';
+            banner.className = 'mic-suspended-banner';
+            banner.innerHTML = `
+                <div class="mic-suspended-content">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+                    </svg>
+                    <span>Microphone paused - tap to recover</span>
+                    <button id="recover-mic-btn" class="btn-recover">Recover Mic</button>
+                </div>
+            `;
+            
+            const mainApp = document.getElementById('main-app');
+            if (mainApp) {
+                mainApp.insertBefore(banner, mainApp.firstChild);
+            }
+            
+            // Add click handler for recovery
+            banner.querySelector('#recover-mic-btn').onclick = async () => {
+                if (app.livekitVoice) {
+                    showNotification('Recovering microphone...', 'info');
+                    const recovered = await app.livekitVoice.recoverMicrophone();
+                    if (!recovered) {
+                        showNotification('Could not recover mic. Try rejoining.', 'error');
+                    }
+                }
+            };
+        }
+        banner.classList.add('show');
+    } else {
+        if (banner) {
+            banner.classList.remove('show');
+            setTimeout(() => banner.remove(), 300);
+        }
+    }
 }
 
 /**

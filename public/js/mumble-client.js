@@ -301,13 +301,23 @@ class MumbleClient {
                     this.onMessage?.(message);
                     break;
                     
+                case 'heartbeat-ack':
+                    // Server acknowledged our heartbeat - connection is alive
+                    // Calculate round-trip time
+                    if (message.timestamp) {
+                        const rtt = Date.now() - message.timestamp;
+                        // Could expose this via callback if needed
+                    }
+                    break;
+                    
                 case 'error':
                     console.error('Server error:', message.error);
                     this.onError?.(new Error(message.error));
                     break;
                     
                 default:
-                    console.log('Unknown message type:', message.type);
+                    // Don't log unknown message types to reduce noise
+                    break;
             }
         } catch (error) {
             console.error('Failed to parse message:', error);
