@@ -93,6 +93,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final room = context.watch<RoomProvider>().currentRoom ?? _room;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     
     return Scaffold(
       backgroundColor: Colors.grey.shade900,
@@ -216,6 +217,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           
           // Voice controls
           _buildVoiceControls(),
+          
+          // Safe area padding for system navigation
+          SizedBox(height: bottomPadding),
         ],
       ),
     );

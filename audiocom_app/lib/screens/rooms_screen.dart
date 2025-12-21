@@ -207,7 +207,12 @@ class _RoomsScreenState extends State<RoomsScreen> {
           return RefreshIndicator(
             onRefresh: () => roomProvider.fetchRooms(),
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: 16 + MediaQuery.of(context).padding.bottom,
+              ),
               itemCount: roomProvider.rooms.length,
               itemBuilder: (context, index) {
                 final room = roomProvider.rooms[index];
