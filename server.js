@@ -439,12 +439,15 @@ function setupWebSocket(srv) {
         });
         
         ws.on('close', () => {
+            console.log(`[WS CLOSE] userId=${userId || 'NOT SET'}`);
             if (userId) {
                 const user = users.get(userId);
+                console.log(`[WS CLOSE] user found: ${!!user}, roomId: ${user?.roomId || 'null'}`);
                 if (user) {
                     // If user is still in a room, mark as reconnecting (network issue)
                     if (user.roomId) {
                         user.networkStatus = 'reconnecting';
+                        console.log(`[WS CLOSE] Broadcasting reconnecting status to room: ${user.roomId}`);
                         broadcastToRoom(user.roomId, {
                             type: 'user-network-status',
                             userId,
@@ -452,10 +455,14 @@ function setupWebSocket(srv) {
                             networkStatus: 'reconnecting'
                         });
                         console.log(`[WS] Marked user as reconnecting: userId=${userId} name=${user.name}`);
+                    } else {
+                        console.log(`[WS CLOSE] User not in room, skipping broadcast`);
                     }
                     user.lastSeen = Date.now();
                     sessionStore.touch(userId);
                 }
+            } else {
+                console.log(`[WS CLOSE] No userId, skipping`);
             }
         });
     });
@@ -575,6 +582,8 @@ setInterval(() => {
         });
     }
     
+    console.log(`[CLEANUP] Checking... activeWsUsers=${activeWsUserIds.size} totalUsers=${users.size}`);
+    
     const removed = sessionStore.cleanup(60 * 1000, activeWsUserIds);
     
     // Also clean up in-memory state for removed sessions
@@ -590,9 +599,11 @@ setInterval(() => {
                     userId,
                     userName: username
                 });
+                console.log(`[CLEANUP] Removed user ${username} from room ${user.roomId}`);
             }
         }
         users.delete(userId);
+        console.log(`[CLEANUP] Deleted user: ${username} (${userId})`);
     }
 }, 10 * 1000);
 
@@ -1286,19 +1297,29 @@ app.get('*', (req, res) => {
 });
 
 function broadcastToRoom(roomId, message, excludeUserId = null) {
-    if (!globalWss) return;
+    if (!globalWss) {
+        console.log(`[BROADCAST] FAILED - globalWss not set, roomId=${roomId}`);
+        return;
+    }
     
     const room = rooms.get(roomId);
-    if (!room) return;
+    if (!room) {
+        console.log(`[BROADCAST] FAILED - room not found, roomId=${roomId}`);
+        return;
+    }
     
+    let sentCount = 0;
     globalWss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && 
             client.userId && 
             room.users.has(client.userId) &&
             client.userId !== excludeUserId) {
             client.send(JSON.stringify(message));
+            sentCount++;
         }
     });
+    
+    console.log(`[BROADCAST] roomId=${roomId} type=${message.type} sentTo=${sentCount} usersInRoom=${room.users.size}`);
 }
 
 // Start server

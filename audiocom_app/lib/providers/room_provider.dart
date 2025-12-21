@@ -24,6 +24,7 @@ class RoomProvider extends ChangeNotifier {
   StreamSubscription? _chatMessageSub;
   StreamSubscription? _userSpeakingSub;
   StreamSubscription? _userNetworkStatusSub;
+  StreamSubscription? _wsConnectionSub;  // WebSocket connection listener
 
   RoomProvider({
     ApiService? apiService,
@@ -31,6 +32,7 @@ class RoomProvider extends ChangeNotifier {
   })  : _apiService = apiService ?? ApiService(),
         _wsService = wsService {
     _setupWebSocketListeners();
+    _setupConnectionListener();
   }
 
   // Getters
@@ -177,6 +179,9 @@ class RoomProvider extends ChangeNotifier {
           _roomUsers.add(user);
           _chatMessages.add(ChatMessage.system('${user.name} joined'));
           notifyListeners();
+          
+          // Refresh room list to update user counts
+          fetchRooms();
         }
       }
     });
@@ -189,6 +194,9 @@ class RoomProvider extends ChangeNotifier {
       _roomUsers.removeWhere((u) => u.id == userId);
       _chatMessages.add(ChatMessage.system('${user.name} left'));
       notifyListeners();
+      
+      // Refresh room list to update user counts
+      fetchRooms();
     });
 
     _userStateSub = _wsService.onUserStateChanged.listen((data) {
@@ -231,6 +239,18 @@ class RoomProvider extends ChangeNotifier {
     });
   }
 
+  /// Listen for WebSocket reconnection to refresh data
+  void _setupConnectionListener() {
+    _wsConnectionSub = _wsService.onConnectionStateChanged.listen((isConnected) {
+      if (isConnected && _currentRoom != null) {
+        // WebSocket reconnected - refresh room data to get current statuses
+        print('📶 WebSocket reconnected - refreshing room data');
+        fetchRoomUsers(_currentRoom!.id);
+        fetchRooms();  // Also refresh room list for user counts
+      }
+    });
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();
@@ -244,7 +264,9 @@ class RoomProvider extends ChangeNotifier {
     _chatMessageSub?.cancel();
     _userSpeakingSub?.cancel();
     _userNetworkStatusSub?.cancel();
+    _wsConnectionSub?.cancel();
     _apiService.dispose();
     super.dispose();
   }
 }
+
