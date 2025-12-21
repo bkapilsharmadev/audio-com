@@ -197,6 +197,7 @@ function setupWebSocket(srv) {
                     case 'register':
                         userId = data.userId;
                         ws.userId = userId;
+                        ws.missedPings = 0;  // Reset missed pings on reconnect
                         logEvent('register', userId);
                         
                         // Close any existing socket for this userId (session takeover)
@@ -340,6 +341,12 @@ function setupWebSocket(srv) {
                         if (statusUser && statusUser.roomId) {
                             const newStatus = data.networkStatus;
                             logEvent('network-status', userId, `status=${newStatus}`);
+                            
+                            // Reset missed pings if client reports good status
+                            if (newStatus === 'good') {
+                                ws.missedPings = 0;
+                            }
+                            
                             statusUser.networkStatus = newStatus;
                             broadcastToRoom(statusUser.roomId, {
                                 type: 'user-network-status',
