@@ -7,6 +7,11 @@ import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 
 /// Authentication Provider - manages user state and auth flow
+/// 
+/// Identity Model:
+/// - (userId + username) is an immutable pair
+/// - If username changes → new userId is generated
+/// - A userId may reconnect, but may NOT rename
 class AuthProvider extends ChangeNotifier {
   final ApiService _apiService;
   final WebSocketService _wsService;
@@ -15,7 +20,10 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _isInitialized = false;
-  String? _stableUserId; // Persistent device identity
+  
+  // Stored identity (userId + username pair)
+  String? _storedUserId;
+  String? _storedUsername;
 
   AuthProvider({
     ApiService? apiService,
@@ -30,28 +38,24 @@ class AuthProvider extends ChangeNotifier {
   String? get error => _error;
   bool get isInitialized => _isInitialized;
   WebSocketService get wsService => _wsService;
+  String? get storedUsername => _storedUsername;
 
-  /// Initialize - load stable userId, but don't auto-login
+  /// Initialize - load stored identity pair
   Future<void> initialize() async {
     if (_isInitialized) return;
     
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // Get or create stable userId (persists forever)
-      _stableUserId = prefs.getString('stableUserId');
-      if (_stableUserId == null) {
-        _stableUserId = const Uuid().v4();
-        await prefs.setString('stableUserId', _stableUserId!);
-        print('Generated new stableUserId: $_stableUserId');
-      } else {
-        print('Loaded existing stableUserId: $_stableUserId');
-      }
+      // Load stored identity pair
+      _storedUserId = prefs.getString('identityUserId');
+      _storedUsername = prefs.getString('identityUsername');
       
-      // Clear session data - user must enter credentials
-      // but keep stableUserId for reconnection identity
-      await prefs.remove('userName');
-      await prefs.remove('userToken');
+      if (_storedUserId != null && _storedUsername != null) {
+        print('Loaded identity: $_storedUsername ($_storedUserId)');
+      } else {
+        print('No stored identity found');
+      }
       
       _currentUser = null;
     } catch (e) {
@@ -62,23 +66,50 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Register a new user (or reconnect with existing identity)
+  /// Register/login with username
+  /// If username differs from stored → new identity created
   Future<bool> register(String name, String serverPassword) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      // Pass stableUserId to server for session ownership
-      final user = await _apiService.register(name, serverPassword, userId: _stableUserId);
+      final trimmedName = name.trim();
+      String userIdToUse;
+      
+      // Check if this is a reconnect or new identity
+      if (_storedUserId != null && _storedUsername != null) {
+        if (trimmedName.toLowerCase() == _storedUsername!.toLowerCase()) {
+          // Same username → reconnect with existing userId
+          userIdToUse = _storedUserId!;
+          print('Reconnecting as: $trimmedName ($userIdToUse)');
+        } else {
+          // Different username → NEW IDENTITY
+          print('Username changed: $_storedUsername → $trimmedName');
+          
+          // Invalidate old session (best-effort)
+          await _invalidateOldSession(_storedUserId!);
+          
+          // Generate new userId
+          userIdToUse = const Uuid().v4();
+          print('New identity created: $trimmedName ($userIdToUse)');
+        }
+      } else {
+        // No stored identity → generate new
+        userIdToUse = const Uuid().v4();
+        print('First time login: $trimmedName ($userIdToUse)');
+      }
+      
+      // Register with server
+      final user = await _apiService.register(trimmedName, serverPassword, userId: userIdToUse);
       _currentUser = user;
       
-      // Save session info (not the userId - that's already stable)
+      // Persist the identity pair (immutable)
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('userName', user.name);
-      if (user.token != null) {
-        await prefs.setString('userToken', user.token!);
-      }
+      await prefs.setString('identityUserId', user.id);
+      await prefs.setString('identityUsername', user.name);
+      _storedUserId = user.id;
+      _storedUsername = user.name;
       
       // Connect WebSocket
       await _connectWebSocket();
@@ -98,8 +129,25 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
   }
+  
+  /// Invalidate old session on server (best-effort, fire-and-forget)
+  Future<void> _invalidateOldSession(String oldUserId) async {
+    try {
+      // Try to connect and send invalidate message
+      await _wsService.connect(oldUserId);
+      _wsService.sendMessage({
+        'type': 'invalidate-user',
+        'userId': oldUserId,
+      });
+      await _wsService.disconnect();
+      print('Sent invalidate for old session: $oldUserId');
+    } catch (e) {
+      // Best-effort - server will clean up via heartbeat anyway
+      print('Could not invalidate old session (will timeout): $e');
+    }
+  }
 
-  /// Logout
+  /// Logout - clears identity completely
   Future<void> logout() async {
     if (_currentUser != null) {
       try {
@@ -111,10 +159,12 @@ class AuthProvider extends ChangeNotifier {
 
     await _wsService.disconnect();
     
-    // Clear session data but keep stableUserId
+    // Clear identity completely on explicit logout
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('userName');
-    await prefs.remove('userToken');
+    await prefs.remove('identityUserId');
+    await prefs.remove('identityUsername');
+    _storedUserId = null;
+    _storedUsername = null;
     
     _currentUser = null;
     _error = null;

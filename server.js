@@ -244,6 +244,41 @@ function setupWebSocket(srv) {
                         ws.send(JSON.stringify({ type: 'heartbeat-ack' }));
                         break;
                     
+                    case 'invalidate-user':
+                        // Explicit session invalidation (used when username changes = new identity)
+                        const invalidateId = data.userId;
+                        console.log(`Received invalidate-user for: ${invalidateId}`);
+                        
+                        const invalidUser = users.get(invalidateId);
+                        if (invalidUser) {
+                            // Broadcast user-left to room
+                            if (invalidUser.roomId) {
+                                broadcastToRoom(invalidUser.roomId, {
+                                    type: 'user-left',
+                                    userId: invalidateId,
+                                    userName: invalidUser.name
+                                });
+                                
+                                // Remove from room
+                                const invalidRoom = rooms.get(invalidUser.roomId);
+                                if (invalidRoom) {
+                                    invalidRoom.users.delete(invalidateId);
+                                }
+                            }
+                            
+                            // Delete user session
+                            users.delete(invalidateId);
+                            console.log(`✓ User invalidated: ${invalidUser.name} (${invalidateId})`);
+                            
+                            // Close any sockets for this userId
+                            wss.clients.forEach(client => {
+                                if (client.userId === invalidateId && client.readyState === WebSocket.OPEN) {
+                                    client.close(1000, 'Session invalidated');
+                                }
+                            });
+                        }
+                        break;
+                    
                     case 'webrtc-join':
                         const rtcUser = users.get(data.userId);
                         if (rtcUser) {
@@ -687,6 +722,8 @@ app.get('/api/users/:id', (req, res) => {
 });
 
 // Register user (or reconnect with existing userId)
+// Identity Rule: (userId + username) is an immutable pair
+// A userId may reconnect. A userId may NOT rename.
 app.post('/api/users/register', (req, res) => {
     const { name, serverPassword, userId: clientUserId } = req.body;
     
@@ -706,13 +743,22 @@ app.post('/api/users/register', (req, res) => {
         const existingUser = users.get(clientUserId);
         
         if (existingUser) {
-            // Same userId reconnecting - allow session takeover
+            // Same userId exists - verify username matches (immutable pair)
+            if (existingUser.name.toLowerCase() !== trimmedName.toLowerCase()) {
+                // REJECT: userId cannot change username
+                console.log(`✗ Rejected username change for ${clientUserId}: ${existingUser.name} → ${trimmedName}`);
+                return res.status(409).json({ 
+                    error: 'Username cannot be changed. Please use a new identity.',
+                    code: 'USERNAME_IMMUTABLE'
+                });
+            }
+            
+            // Same userId + same username → allow reconnect
             console.log(`✓ User reconnecting: ${existingUser.name} (${clientUserId})`);
             
-            // Update name if changed (optional)
-            existingUser.name = trimmedName;
             existingUser.connectedAt = new Date();
             existingUser.networkStatus = 'good';
+            existingUser.lastSeen = Date.now();
             
             return res.status(200).json({
                 id: existingUser.id,
@@ -723,13 +769,13 @@ app.post('/api/users/register', (req, res) => {
             });
         }
         
-        // userId provided but not found - check if username is taken by DIFFERENT userId
+        // userId not found - check if username is taken by a DIFFERENT userId
         const userWithSameName = Array.from(users.values()).find(
             u => u.name.toLowerCase() === trimmedName.toLowerCase()
         );
         
         if (userWithSameName) {
-            // Username taken by different userId - check if that user is stale (disconnected > 2 min)
+            // Username taken by different userId - check if stale (disconnected > 2 min)
             const isStale = userWithSameName.networkStatus === 'disconnected' || 
                            (userWithSameName.lastSeen && Date.now() - userWithSameName.lastSeen > 2 * 60 * 1000);
             
@@ -760,7 +806,7 @@ app.post('/api/users/register', (req, res) => {
         };
         
         users.set(user.id, user);
-        console.log(`✓ User registered with client userId: ${user.name} (${user.id})`);
+        console.log(`✓ User registered: ${user.name} (${user.id})`);
         
         return res.status(201).json({
             id: user.id,
@@ -790,7 +836,7 @@ app.post('/api/users/register', (req, res) => {
     };
     
     users.set(user.id, user);
-    console.log(`✓ User registered (new): ${user.name} (${user.id})`);
+    console.log(`✓ User registered (legacy): ${user.name} (${user.id})`);
     
     res.status(201).json({
         id: user.id,

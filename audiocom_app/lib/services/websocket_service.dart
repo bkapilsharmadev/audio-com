@@ -108,6 +108,11 @@ class WebSocketService {
     _handleDisconnect();
   }
 
+  /// Send a generic message (for invalidate-user, etc.)
+  void sendMessage(Map<String, dynamic> message) {
+    _send(message);
+  }
+
   /// Send a chat message
   void sendChatMessage(String content) {
     _send({
