@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import '../services/livekit_service.dart';
 import '../services/websocket_service.dart';
 import '../services/foreground_service.dart';
+import '../services/settings_service.dart';
 
 /// Audio Provider - manages voice chat state
 class AudioProvider extends ChangeNotifier {
@@ -18,6 +19,7 @@ class AudioProvider extends ChangeNotifier {
   bool _isDeafened = false;
   bool _isConnecting = false;
   String? _error;
+  int _audioBitrateKbps = 32; // Current bitrate setting
   
   String? _currentRoomId;
   String? _currentUserId;
@@ -37,6 +39,7 @@ class AudioProvider extends ChangeNotifier {
         _livekitService = livekitService ?? LivekitService(),
         _wsService = wsService {
     _setupListeners();
+    _loadSettings();
   }
 
   // Getters
@@ -46,6 +49,22 @@ class AudioProvider extends ChangeNotifier {
   bool get isConnecting => _isConnecting;
   String? get error => _error;
   LivekitService get livekitService => _livekitService;
+  int get audioBitrateKbps => _audioBitrateKbps;
+
+  /// Load settings from storage
+  Future<void> _loadSettings() async {
+    final settings = await SettingsService.getInstance();
+    _audioBitrateKbps = settings.audioBitrateKbps;
+    notifyListeners();
+  }
+
+  /// Set audio bitrate (8-128 kbps)
+  Future<void> setAudioBitrate(int kbps) async {
+    _audioBitrateKbps = kbps.clamp(8, 128);
+    final settings = await SettingsService.getInstance();
+    await settings.setAudioBitrateKbps(_audioBitrateKbps);
+    notifyListeners();
+  }
 
   /// Request microphone permission
   Future<bool> requestMicrophonePermission() async {
@@ -80,8 +99,8 @@ class AudioProvider extends ChangeNotifier {
       final token = tokenData['token'] as String;
       final url = tokenData['url'] as String;
 
-      // Connect to LiveKit
-      await _livekitService.connect(url, token);
+      // Connect to LiveKit with configured bitrate
+      await _livekitService.connect(url, token, audioBitrateBps: _audioBitrateKbps * 1000);
       
       _currentRoomId = roomId;
       _currentUserId = userId;

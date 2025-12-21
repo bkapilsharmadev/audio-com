@@ -19,6 +19,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   final _chatController = TextEditingController();
   final _scrollController = ScrollController();
   Room? _room;
+  bool _isLeaving = false;  // Prevent double-leave
 
   @override
   void initState() {
@@ -51,6 +52,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   Future<void> _leaveRoom() async {
+    if (_isLeaving) return;  // Prevent double-leave
+    _isLeaving = true;
+    
     final auth = context.read<AuthProvider>();
     final roomProvider = context.read<RoomProvider>();
     final audio = context.read<AudioProvider>();
@@ -95,9 +99,15 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     final room = context.watch<RoomProvider>().currentRoom ?? _room;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
-    return Scaffold(
-      backgroundColor: Colors.grey.shade900,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false,  // Intercept back button
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _leaveRoom();  // Properly leave room before popping
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey.shade900,
+        appBar: AppBar(
         backgroundColor: Colors.grey.shade800,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -222,6 +232,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           SizedBox(height: bottomPadding),
         ],
       ),
+    ),  // Close PopScope
     );
   }
 
@@ -249,31 +260,29 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         children: [
           Stack(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: user.isSpeaking 
-                      ? Colors.green.withOpacity(0.3) 
-                      : Colors.grey.shade700,
-                  shape: BoxShape.circle,
-                  border: user.isSpeaking
-                      ? Border.all(color: Colors.green, width: 2)
-                      : null,
-                ),
-                child: Center(
-                  child: Text(
-                    user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+              // Animated speaking ring
+              if (user.isSpeaking)
+                _SpeakingRing(
+                  child: _buildAvatarCircle(user),
+                )
+              else
+                _buildAvatarCircle(user),
+              // Deafened indicator (bottom right) - takes priority over muted
+              if (user.isDeafened)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade700,
+                      shape: BoxShape.circle,
                     ),
+                    child: const Icon(Icons.headset_off, size: 12, color: Colors.white),
                   ),
-                ),
-              ),
+                )
               // Muted indicator (bottom right)
-              if (user.isMuted)
+              else if (user.isMuted)
                 Positioned(
                   right: 0,
                   bottom: 0,
@@ -485,5 +494,104 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   String _formatTime(DateTime time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildAvatarCircle(User user) {
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade700,
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Animated speaking ring widget
+class _SpeakingRing extends StatefulWidget {
+  final Widget child;
+  
+  const _SpeakingRing({required this.child});
+
+  @override
+  State<_SpeakingRing> createState() => _SpeakingRingState();
+}
+
+class _SpeakingRingState extends State<_SpeakingRing> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _opacityAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.15).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    
+    _opacityAnimation = Tween<double>(begin: 0.8, end: 0.3).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Animated outer ring
+            Transform.scale(
+              scale: _scaleAnimation.value,
+              child: Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.green.withOpacity(_opacityAnimation.value),
+                    width: 3,
+                  ),
+                ),
+              ),
+            ),
+            // Inner green border
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.green, width: 2),
+              ),
+              child: ClipOval(child: widget.child),
+            ),
+          ],
+        );
+      },
+    );
   }
 }

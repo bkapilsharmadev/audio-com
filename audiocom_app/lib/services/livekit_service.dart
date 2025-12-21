@@ -9,6 +9,7 @@ class LivekitService {
   
   bool _isMicEnabled = false;
   bool _isConnected = false;
+  int _currentBitrate = 32000; // Current bitrate in bps
 
   // Event streams
   final _connectionStateController = StreamController<bool>.broadcast();
@@ -29,6 +30,7 @@ class LivekitService {
   // Getters
   bool get isConnected => _isConnected;
   bool get isMicEnabled => _isMicEnabled;
+  int get currentBitrate => _currentBitrate;
   Room? get room => _room;
   LocalParticipant? get localParticipant => _localParticipant;
   
@@ -36,18 +38,22 @@ class LivekitService {
     return _room?.remoteParticipants.values.toList() ?? [];
   }
 
-  /// Connect to LiveKit room
-  Future<void> connect(String url, String token) async {
+  /// Connect to LiveKit room with configurable bitrate
+  Future<void> connect(String url, String token, {int audioBitrateBps = 32000}) async {
+    _currentBitrate = audioBitrateBps;
+    
     try {
       // Create room with audio-only options
+      // Opus codec bitrate settings - configurable
       _room = Room(
-        roomOptions: const RoomOptions(
+        roomOptions: RoomOptions(
           adaptiveStream: true,
           dynacast: true,
           defaultAudioPublishOptions: AudioPublishOptions(
             dtx: true,  // Discontinuous transmission for bandwidth saving
+            audioBitrate: audioBitrateBps,  // Configurable bitrate (Opus range: 6-510 kbps)
           ),
-          defaultVideoPublishOptions: VideoPublishOptions(
+          defaultVideoPublishOptions: const VideoPublishOptions(
             simulcast: false,
           ),
         ),
@@ -70,6 +76,8 @@ class LivekitService {
       _localParticipant = _room!.localParticipant;
       _isConnected = true;
       _connectionStateController.add(true);
+      
+      print('✓ Connected to LiveKit room (bitrate: ${audioBitrateBps ~/ 1000} kbps)');
 
       print('✓ Connected to LiveKit room');
     } catch (e) {

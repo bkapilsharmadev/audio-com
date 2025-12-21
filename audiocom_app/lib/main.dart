@@ -7,23 +7,24 @@ import 'providers/audio_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/rooms_screen.dart';
 import 'screens/voice_room_screen.dart';
+import 'screens/settings_screen.dart';
 import 'services/foreground_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Initialize foreground service handler
   ForegroundServiceHandler.init();
-  runApp(const GoogleApp());
+  runApp(const AudioComApp());
 }
 
-class GoogleApp extends StatefulWidget {
-  const GoogleApp({super.key});
+class AudioComApp extends StatefulWidget {
+  const AudioComApp({super.key});
 
   @override
-  State<GoogleApp> createState() => _GoogleAppState();
+  State<AudioComApp> createState() => _AudioComAppState();
 }
 
-class _GoogleAppState extends State<GoogleApp> with WidgetsBindingObserver {
+class _AudioComAppState extends State<AudioComApp> with WidgetsBindingObserver {
   AuthProvider? _authProvider;
 
   @override
@@ -81,7 +82,7 @@ class _GoogleAppState extends State<GoogleApp> with WidgetsBindingObserver {
       ],
       child: WithForegroundTask(
         child: MaterialApp(
-          title: 'Google',
+          title: 'AudioCom',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(
@@ -95,6 +96,7 @@ class _GoogleAppState extends State<GoogleApp> with WidgetsBindingObserver {
             '/login': (context) => const LoginScreen(),
             '/rooms': (context) => const RoomsScreen(),
             '/voice': (context) => const VoiceRoomScreen(),
+            '/settings': (context) => const SettingsScreen(),
           },
         ),
       ),
@@ -145,14 +147,14 @@ class _AppInitializerState extends State<AppInitializer> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.settings,
+                Icons.mic,
                 size: 64,
                 color: Colors.white,
               ),
             ),
             const SizedBox(height: 24),
             const Text(
-              'Google',
+              'AudioCom',
               style: TextStyle(
                 fontSize: 36,
                 fontWeight: FontWeight.bold,

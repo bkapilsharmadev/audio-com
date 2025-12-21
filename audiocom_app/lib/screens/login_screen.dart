@@ -80,7 +80,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(
-                        Icons.settings,
+                        Icons.mic,
                         size: 64,
                         color: Colors.white,
                       ),
@@ -89,7 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     // App Name
                     const Text(
-                      'Google',
+                      'AudioCom',
                       style: TextStyle(
                         fontSize: 36,
                         fontWeight: FontWeight.bold,
@@ -98,7 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Settings',
+                      'Voice Chat',
                       style: TextStyle(
                         fontSize: 16,
                         color: Colors.white.withOpacity(0.7),

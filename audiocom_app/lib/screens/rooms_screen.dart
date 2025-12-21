@@ -151,10 +151,18 @@ class _RoomsScreenState extends State<RoomsScreen> {
           children: [
             const Icon(Icons.headset_mic, color: Colors.white),
             const SizedBox(width: 8),
-            const Text('Google'),
+            const Text('AudioCom'),
           ],
         ),
         actions: [
+          // Settings button
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.pushNamed(context, '/settings');
+            },
+            tooltip: 'Settings',
+          ),
           // User info
           if (auth.currentUser != null)
             Padding(

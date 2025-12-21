@@ -389,7 +389,7 @@ function setupWebSocket(srv) {
                         });
                     }
                     
-                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 2 min if no reconnect`);
+                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 10 min if no reconnect`);
                 }
             }
         });
@@ -499,9 +499,9 @@ function restorePersistedSessions() {
 
 restorePersistedSessions();
 
-// Periodic cleanup of stale sessions (every 30 seconds, expire after 2 minutes)
+// Periodic cleanup of stale sessions (every 30 seconds, expire after 10 minutes)
 setInterval(() => {
-    const removed = sessionStore.cleanup(2 * 60 * 1000);
+    const removed = sessionStore.cleanup(10 * 60 * 1000);
     
     // Also clean up in-memory state for removed sessions
     for (const { userId, username } of removed) {
@@ -903,9 +903,9 @@ app.post('/api/users/register', (req, res) => {
         
         if (takenBy || memoryUser) {
             const conflictUser = takenBy || memoryUser;
-            // Check if stale (disconnected > 2 min)
+            // Check if stale (disconnected > 10 min)
             const isStale = (conflictUser.networkStatus === 'disconnected') || 
-                           (conflictUser.lastSeen && Date.now() - conflictUser.lastSeen > 2 * 60 * 1000);
+                           (conflictUser.lastSeen && Date.now() - conflictUser.lastSeen > 10 * 60 * 1000);
             
             if (isStale) {
                 // Allow takeover - remove stale user
