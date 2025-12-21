@@ -267,6 +267,11 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         networkIndicatorColor = Colors.orange;
         networkIcon = Icons.signal_cellular_alt_2_bar;
         break;
+      case 'reconnecting':
+        // Network issue - user is trying to reconnect (red wifi icon)
+        networkIndicatorColor = Colors.red;
+        networkIcon = Icons.wifi_off;
+        break;
       case 'disconnected':
         networkIndicatorColor = Colors.red;
         networkIcon = Icons.signal_cellular_off;
@@ -339,7 +344,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             child: Text(
               user.name,
               style: TextStyle(
-                color: user.networkStatus == 'disconnected' 
+                color: (user.networkStatus == 'disconnected' || user.networkStatus == 'reconnecting')
                     ? Colors.red.shade300 
                     : Colors.grey.shade300,
                 fontSize: 11,

@@ -22,14 +22,21 @@ enum NetworkStatus {
   good,
   weak,
   disconnected,
+  reconnecting,
 }
 
 /// WebSocket Service for real-time communication
 class WebSocketService {
   WebSocketChannel? _channel;
   String? _userId;
+  String? _wsUrl;
   Timer? _heartbeatTimer;
+  Timer? _reconnectTimer;
   bool _isConnected = false;
+  bool _intentionalDisconnect = false;  // Track if disconnect was user-initiated
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 10;
+  static const int _baseReconnectDelayMs = 2000;
 
   // Event streams
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
@@ -55,20 +62,26 @@ class WebSocketService {
 
   /// Connect to WebSocket server
   Future<void> connect(String userId, {String? wsUrl}) async {
+    // Cancel any pending reconnect
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    
     if (_isConnected) {
       await disconnect();
     }
 
     _userId = userId;
-    final url = wsUrl ?? ApiConfig.wsUrl;
+    _wsUrl = wsUrl ?? ApiConfig.wsUrl;
+    _intentionalDisconnect = false;  // Reset for new connection
 
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(url));
+      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl!));
       
       // Wait for connection
       await _channel!.ready;
       
       _isConnected = true;
+      _reconnectAttempts = 0;  // Reset on successful connection
       _connectionStateController.add(true);
 
       // Register user
@@ -82,11 +95,11 @@ class WebSocketService {
         _handleMessage,
         onError: (error) {
           print('WebSocket error: $error');
-          _handleDisconnect();
+          _handleNetworkDisconnect();
         },
         onDone: () {
           print('WebSocket closed');
-          _handleDisconnect();
+          _handleNetworkDisconnect();
         },
       );
 
@@ -94,19 +107,26 @@ class WebSocketService {
       _handleReconnect();
     } catch (e) {
       print('WebSocket connection failed: $e');
-      _handleDisconnect();
+      _handleNetworkDisconnect();
       rethrow;
     }
   }
 
-  /// Disconnect from WebSocket server
+  /// Disconnect from WebSocket server (intentional - user action)
   Future<void> disconnect() async {
+    _intentionalDisconnect = true;  // Mark as user-initiated
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     
     await _channel?.sink.close();
     _channel = null;
+    
+    // Clear stored connection info since this is intentional
     _userId = null;
+    _wsUrl = null;
+    _reconnectAttempts = 0;
     
     _handleDisconnect();
   }
@@ -232,16 +252,108 @@ class WebSocketService {
     }
   }
 
+  /// Handle intentional disconnect (user action - no reconnect)
   void _handleDisconnect() {
     if (_isConnected) {
       _isConnected = false;
       _connectionStateController.add(false);
+    }
+  }
+
+  /// Handle network disconnect (unintentional - attempt reconnect)
+  void _handleNetworkDisconnect() {
+    if (!_isConnected && !_intentionalDisconnect) {
+      // Already disconnected, might be in reconnect loop
+      return;
+    }
+    
+    final wasConnected = _isConnected;
+    _isConnected = false;
+    _channel = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    
+    if (wasConnected) {
+      _connectionStateController.add(false);
+      
       // Notify UI that current user is reconnecting
       _userNetworkStatusController.add({
         'userId': _userId,
         'userName': '',
         'networkStatus': 'reconnecting',
       });
+    }
+    
+    // Attempt reconnection if not intentional and we have connection info
+    if (!_intentionalDisconnect && _userId != null && _wsUrl != null) {
+      _scheduleReconnect();
+    }
+  }
+
+  /// Schedule a reconnection attempt with exponential backoff
+  void _scheduleReconnect() {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      print('Max reconnection attempts reached ($_maxReconnectAttempts)');
+      _userNetworkStatusController.add({
+        'userId': _userId,
+        'userName': '',
+        'networkStatus': 'disconnected',
+      });
+      return;
+    }
+    
+    // Exponential backoff: 2s, 4s, 8s, 16s... capped at 30s
+    final delay = Duration(
+      milliseconds: (_baseReconnectDelayMs * (1 << _reconnectAttempts)).clamp(0, 30000),
+    );
+    _reconnectAttempts++;
+    
+    print('Scheduling reconnect attempt $_reconnectAttempts in ${delay.inSeconds}s');
+    
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, _attemptReconnect);
+  }
+
+  /// Attempt to reconnect
+  Future<void> _attemptReconnect() async {
+    if (_intentionalDisconnect || _userId == null || _wsUrl == null) {
+      return;
+    }
+    
+    print('Attempting reconnect (attempt $_reconnectAttempts)...');
+    
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(_wsUrl!));
+      await _channel!.ready;
+      
+      _isConnected = true;
+      _reconnectAttempts = 0;
+      _connectionStateController.add(true);
+      
+      // Re-register user
+      _send({'type': 'register', 'userId': _userId});
+      
+      // Restart heartbeat
+      _startHeartbeat();
+      
+      // Listen for messages
+      _channel!.stream.listen(
+        _handleMessage,
+        onError: (error) {
+          print('WebSocket error after reconnect: $error');
+          _handleNetworkDisconnect();
+        },
+        onDone: () {
+          print('WebSocket closed after reconnect');
+          _handleNetworkDisconnect();
+        },
+      );
+      
+      print('Reconnected successfully!');
+      _handleReconnect();
+    } catch (e) {
+      print('Reconnection attempt failed: $e');
+      _scheduleReconnect();
     }
   }
 
@@ -256,6 +368,8 @@ class WebSocketService {
   }
 
   void dispose() {
+    _intentionalDisconnect = true;  // Prevent reconnect during dispose
+    _reconnectTimer?.cancel();
     disconnect();
     _messageController.close();
     _userJoinedController.close();

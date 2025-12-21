@@ -19,6 +19,7 @@ class AudioProvider extends ChangeNotifier {
   bool _isDeafened = false;
   bool _isConnecting = false;
   bool _isReconnecting = false;
+  bool _pendingVoiceRejoin = false;  // Track if we need to rejoin voice after reconnect
   String? _error;
   int _audioBitrateKbps = 32; // Current bitrate setting
   
@@ -27,12 +28,19 @@ class AudioProvider extends ChangeNotifier {
   String? _currentUserName;
   String? _currentRoomName;
   
+  // Store last room info for auto-rejoin after network recovery
+  String? _lastRoomId;
+  String? _lastUserId;
+  String? _lastUserName;
+  String? _lastRoomName;
+  
   StreamSubscription? _speakingChangedSub;
   StreamSubscription? _participantJoinedSub;
   StreamSubscription? _participantLeftSub;
   StreamSubscription? _errorSub;
   StreamSubscription? _connectionStateSub;
   StreamSubscription? _reconnectingSub;
+  StreamSubscription? _wsConnectionSub;  // WebSocket connection listener
 
   AudioProvider({
     ApiService? apiService,
@@ -114,6 +122,13 @@ class AudioProvider extends ChangeNotifier {
       _isMuted = true;  // Start muted
       _isReconnecting = false;
       _isConnecting = false;
+      _pendingVoiceRejoin = false;  // Clear pending rejoin flag
+      
+      // Store for potential auto-rejoin after network recovery
+      _lastRoomId = roomId;
+      _lastUserId = userId;
+      _lastUserName = userName;
+      _lastRoomName = displayName;
       
       // Keep screen on during call
       await WakelockPlus.enable();
@@ -138,8 +153,15 @@ class AudioProvider extends ChangeNotifier {
     }
   }
 
-  /// Leave voice channel
+  /// Leave voice channel (intentional - user action)
   Future<void> leaveVoice() async {
+    // Clear last room info - intentional leave should NOT auto-rejoin
+    _lastRoomId = null;
+    _lastUserId = null;
+    _lastUserName = null;
+    _lastRoomName = null;
+    _pendingVoiceRejoin = false;
+    
     await _livekitService.disconnect();
     
     // Stop foreground service
@@ -257,6 +279,12 @@ class AudioProvider extends ChangeNotifier {
         _isReconnecting = false;
         _error = 'Disconnected from voice - network error';
         
+        // Mark for auto-rejoin when network recovers (only if we have room info)
+        if (_lastRoomId != null && _lastUserId != null) {
+          _pendingVoiceRejoin = true;
+          print('📋 Pending voice rejoin set for room: $_lastRoomId');
+        }
+        
         // Notify other users of disconnection
         _wsService.sendNetworkStatus('disconnected');
         
@@ -271,6 +299,7 @@ class AudioProvider extends ChangeNotifier {
         // Connected (initial or reconnected)
         _isReconnecting = false;
         _error = null;
+        _pendingVoiceRejoin = false;  // Clear pending - we're connected
         if (_currentRoomId != null) {
           _isInVoiceChannel = true;
           // Notify other users we're back online
@@ -293,6 +322,64 @@ class AudioProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+
+    // Listen for WebSocket connection state to trigger auto-rejoin
+    _wsConnectionSub = _wsService.onConnectionStateChanged.listen((isWsConnected) {
+      if (isWsConnected && _pendingVoiceRejoin) {
+        // WebSocket reconnected and we have a pending voice rejoin
+        _attemptVoiceRejoin();
+      }
+    });
+  }
+
+  /// Attempt to automatically rejoin voice after network recovery
+  Future<void> _attemptVoiceRejoin() async {
+    if (!_pendingVoiceRejoin) return;
+    if (_lastRoomId == null || _lastUserId == null || _lastUserName == null) {
+      _pendingVoiceRejoin = false;
+      return;
+    }
+    
+    // Prevent multiple rejoin attempts
+    if (_isConnecting || _isInVoiceChannel) {
+      _pendingVoiceRejoin = false;
+      return;
+    }
+    
+    print('🔄 Attempting automatic voice rejoin to: $_lastRoomName ($_lastRoomId)');
+    _error = 'Rejoining voice...';
+    notifyListeners();
+    
+    // Small delay to ensure network is stable
+    await Future.delayed(const Duration(seconds: 1));
+    
+    // Check again if we should still rejoin
+    if (!_pendingVoiceRejoin || _isInVoiceChannel) {
+      return;
+    }
+    
+    try {
+      final success = await joinVoice(
+        _lastRoomId!,
+        _lastUserId!,
+        _lastUserName!,
+        roomName: _lastRoomName,
+      );
+      
+      if (success) {
+        print('✓ Automatic voice rejoin successful!');
+        _error = null;
+      } else {
+        print('✗ Automatic voice rejoin failed');
+        _pendingVoiceRejoin = false;  // Don't retry forever
+      }
+    } catch (e) {
+      print('✗ Automatic voice rejoin error: $e');
+      _pendingVoiceRejoin = false;  // Don't retry forever
+      _error = 'Failed to rejoin voice';
+    }
+    
+    notifyListeners();
   }
 
   void clearError() {
@@ -308,9 +395,11 @@ class AudioProvider extends ChangeNotifier {
     _errorSub?.cancel();
     _connectionStateSub?.cancel();
     _reconnectingSub?.cancel();
+    _wsConnectionSub?.cancel();
     _livekitService.dispose();
     _apiService.dispose();
     WakelockPlus.disable();
     super.dispose();
   }
 }
+

@@ -6,7 +6,7 @@ class User {
   bool isMuted;
   bool isDeafened;
   bool isSpeaking;
-  String networkStatus; // 'good', 'weak', 'disconnected'
+  String networkStatus; // 'good', 'weak', 'disconnected', 'reconnecting'
   final DateTime? connectedAt;
   final String? token;
 

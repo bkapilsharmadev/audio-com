@@ -197,7 +197,22 @@ function setupWebSocket(srv) {
                         const regUser = users.get(userId);
                         if (regUser) {
                             regUser.lastSeen = Date.now();
+                            
+                            // If user was reconnecting/disconnected and is still in a room, broadcast recovery
+                            const wasDisconnected = regUser.networkStatus === 'reconnecting' || 
+                                                   regUser.networkStatus === 'disconnected' ||
+                                                   regUser.networkStatus === 'weak';
                             regUser.networkStatus = 'good';
+                            
+                            if (wasDisconnected && regUser.roomId) {
+                                broadcastToRoom(regUser.roomId, {
+                                    type: 'user-network-status',
+                                    userId,
+                                    userName: regUser.name,
+                                    networkStatus: 'good'
+                                });
+                                console.log(`[WS] User reconnected to room: userId=${userId} name=${regUser.name} room=${regUser.roomId}`);
+                            }
                         }
                         break;
                         
@@ -834,6 +849,7 @@ app.get('/api/users', (req, res) => {
         isMuted: user.isMuted,
         isDeafened: user.isDeafened,
         isSpeaking: user.isSpeaking,
+        networkStatus: user.networkStatus || 'good',
         connectedAt: user.connectedAt
     }));
     res.json(result);
@@ -850,7 +866,8 @@ app.get('/api/users/:id', (req, res) => {
         name: user.name,
         roomId: user.roomId,
         isMuted: user.isMuted,
-        isDeafened: user.isDeafened
+        isDeafened: user.isDeafened,
+        networkStatus: user.networkStatus || 'good'
     });
 });
 
