@@ -319,6 +319,23 @@ function setupWebSocket(srv) {
                         ws.send(JSON.stringify({ type: 'heartbeat-ack' }));
                         break;
                     
+                    case 'network-status':
+                        // Client-reported network status (weak, disconnected, good)
+                        // Broadcast immediately to all users in the room
+                        const statusUser = users.get(userId);
+                        if (statusUser && statusUser.roomId) {
+                            const newStatus = data.networkStatus;
+                            logEvent('network-status', userId, `status=${newStatus}`);
+                            statusUser.networkStatus = newStatus;
+                            broadcastToRoom(statusUser.roomId, {
+                                type: 'user-network-status',
+                                userId,
+                                userName: statusUser.name,
+                                networkStatus: newStatus
+                            });
+                        }
+                        break;
+                    
                     case 'invalidate-user':
                         // Explicit session invalidation (used when username changes = new identity)
                         const invalidateId = data.userId;
