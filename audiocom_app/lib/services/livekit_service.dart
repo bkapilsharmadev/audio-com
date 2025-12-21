@@ -144,6 +144,7 @@ class LivekitService {
   Future<void> disconnect() async {
     _isMicEnabled = false;
     _isConnected = false;
+    _isDeafened = false;  // Reset deafen state so new room starts fresh
     
     _roomListener?.dispose();
     _roomListener = null;
