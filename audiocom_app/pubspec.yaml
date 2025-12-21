@@ -1,7 +1,7 @@
 name: audiocom_app
 description: "AudioCom - Voice Chat Application"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2002
 
 environment:
   sdk: ^3.9.2

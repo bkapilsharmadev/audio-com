@@ -111,6 +111,35 @@ class LivekitService {
     }
   }
 
+  bool _isDeafened = false;
+  bool get isDeafened => _isDeafened;
+
+  /// Set deafened state - mutes/unmutes all incoming audio
+  Future<void> setDeafened(bool deafened) async {
+    if (_room == null) return;
+    
+    _isDeafened = deafened;
+    
+    try {
+      // Iterate through all remote participants and mute/unmute their audio tracks
+      for (final participant in _room!.remoteParticipants.values) {
+        for (final publication in participant.audioTrackPublications) {
+          // Use disable/enable on RemoteTrackPublication to control subscription
+          // When disabled, audio from this track won't play
+          if (deafened) {
+            await publication.disable();
+          } else {
+            await publication.enable();
+          }
+        }
+      }
+      print('Audio ${deafened ? "deafened (disabled remote tracks)" : "undeafened (enabled remote tracks)"}');
+    } catch (e) {
+      print('Failed to set deafen state: $e');
+      _errorController.add('Deafen error: $e');
+    }
+  }
+
   /// Disconnect from room
   Future<void> disconnect() async {
     _isMicEnabled = false;
@@ -145,6 +174,12 @@ class LivekitService {
       ..on<TrackSubscribedEvent>((event) {
         print('Track subscribed: ${event.publication.sid}');
         _trackSubscribedController.add(event.publication);
+        
+        // If we're currently deafened, disable new audio tracks immediately
+        if (_isDeafened && event.publication.kind == TrackType.AUDIO) {
+          event.publication.disable();
+          print('New track auto-disabled (deafened)');
+        }
       })
       ..on<TrackUnsubscribedEvent>((event) {
         print('Track unsubscribed: ${event.publication.sid}');

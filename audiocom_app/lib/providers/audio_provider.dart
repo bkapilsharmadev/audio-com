@@ -155,21 +155,27 @@ class AudioProvider extends ChangeNotifier {
 
     _isDeafened = !_isDeafened;
     
-    // When deafening, also mute
-    if (_isDeafened && !_isMuted) {
-      await toggleMute();
+    try {
+      // Actually mute/unmute incoming audio via LiveKit
+      await _livekitService.setDeafened(_isDeafened);
+      
+      // When deafening, also mute outgoing audio
+      if (_isDeafened && !_isMuted) {
+        await toggleMute();
+      }
+      
+      // Update server state
+      if (_currentUserId != null) {
+        await _apiService.updateUserState(_currentUserId!, isDeafened: _isDeafened);
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      // Revert state on error
+      _isDeafened = !_isDeafened;
+      _error = 'Failed to toggle deafen: $e';
+      notifyListeners();
     }
-    
-    // Update server state
-    if (_currentUserId != null) {
-      await _apiService.updateUserState(_currentUserId!, isDeafened: _isDeafened);
-    }
-    
-    // TODO: Implement audio output muting in LiveKit
-    // LiveKit doesn't have a direct "deafen" method, 
-    // you would need to mute all incoming audio tracks
-    
-    notifyListeners();
   }
 
   /// Set speaking state (called from voice activity detection)
