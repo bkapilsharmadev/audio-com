@@ -121,7 +121,17 @@ class _AppInitializerState extends State<AppInitializer> {
 
   Future<void> _initialize() async {
     final auth = context.read<AuthProvider>();
+    final audio = context.read<AudioProvider>();
+    
     await auth.initialize();
+    
+    // Listen for session expiration - navigate to login when triggered
+    audio.onSessionExpired.listen((_) {
+      if (mounted) {
+        auth.handleSessionExpired();
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
+    });
     
     if (mounted) {
       if (auth.isLoggedIn) {

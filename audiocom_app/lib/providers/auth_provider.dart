@@ -171,6 +171,17 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Handle session expiration - clears current user but keeps stored username
+  /// This allows the user to easily re-login with the same name
+  void handleSessionExpired() {
+    print('⚠️ Session expired - clearing current user');
+    _wsService.disconnect();
+    _currentUser = null;
+    _error = 'Session expired. Please login again.';
+    // Keep _storedUsername so user can easily re-login with same name
+    notifyListeners();
+  }
+
   /// Update user state (mute, deafen)
   Future<void> updateState({bool? isMuted, bool? isDeafened}) async {
     if (_currentUser == null) return;

@@ -34,6 +34,10 @@ class AudioProvider extends ChangeNotifier {
   String? _lastUserName;
   String? _lastRoomName;
   
+  // Session expiration stream - listen to this to navigate to login
+  final _sessionExpiredController = StreamController<void>.broadcast();
+  Stream<void> get onSessionExpired => _sessionExpiredController.stream;
+  
   StreamSubscription? _speakingChangedSub;
   StreamSubscription? _participantJoinedSub;
   StreamSubscription? _participantLeftSub;
@@ -389,8 +393,11 @@ class AudioProvider extends ChangeNotifier {
         _lastUserId = null;
         _lastUserName = null;
         _lastRoomName = null;
-        _error = 'Session expired. Please rejoin the room.';
-        print('⚠️ Session expired - user needs to rejoin manually');
+        _error = 'Session expired. Please login again.';
+        print('⚠️ Session expired - navigating to login');
+        
+        // Notify listeners that session expired - triggers navigation to login
+        _sessionExpiredController.add(null);
       } else {
         _error = 'Failed to rejoin: ${e.message}';
       }
@@ -417,6 +424,7 @@ class AudioProvider extends ChangeNotifier {
     _connectionStateSub?.cancel();
     _reconnectingSub?.cancel();
     _wsConnectionSub?.cancel();
+    _sessionExpiredController.close();
     _livekitService.dispose();
     _apiService.dispose();
     WakelockPlus.disable();
