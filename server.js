@@ -207,11 +207,29 @@ function setupWebSocket(srv) {
                     case 'leave-room':
                         const leaveUser = users.get(userId);
                         if (leaveUser) {
+                            // Broadcast to room BEFORE removing
                             broadcastToRoom(data.roomId, {
                                 type: 'user-left',
                                 userId,
                                 userName: leaveUser.name
                             });
+                            
+                            // Actually remove user from room
+                            const leaveRoom = rooms.get(data.roomId);
+                            if (leaveRoom) {
+                                leaveRoom.users.delete(userId);
+                            }
+                            leaveUser.roomId = null;
+                            
+                            // Update persisted session (no room)
+                            sessionStore.save({
+                                userId: leaveUser.id,
+                                username: leaveUser.name,
+                                roomId: null,
+                                lastSeen: Date.now()
+                            });
+                            
+                            console.log(`✓ User ${leaveUser.name} left room ${data.roomId}`);
                         }
                         break;
                     
