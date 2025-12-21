@@ -2356,3 +2356,22 @@ function escapeHtml(text) {
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', initializeApp);
+
+// Cleanup when page is closed/refreshed
+window.addEventListener('beforeunload', () => {
+    // Disconnect voice if connected
+    if (app.livekitVoice) {
+        app.livekitVoice.disconnect();
+    }
+    // WebSocket will auto-close, server will cleanup
+});
+
+// Also handle visibility change (tab hidden/closed)
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+        // Send a final heartbeat to keep connection for brief tab switches
+        if (app.socket && app.socket.readyState === WebSocket.OPEN) {
+            app.socket.send(JSON.stringify({ type: 'heartbeat' }));
+        }
+    }
+});

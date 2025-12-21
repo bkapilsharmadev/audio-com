@@ -137,3 +137,31 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Flutter/Dart
+audiocom_app/.dart_tool/
+audiocom_app/.packages
+audiocom_app/build/
+audiocom_app/.flutter-plugins
+audiocom_app/.flutter-plugins-dependencies
+audiocom_app/.pub-cache/
+audiocom_app/.pub/
+audiocom_app/pubspec.lock
+*.iml
+*.ipr
+*.iws
+.idea/
+audiocom_app/android/.gradle/
+audiocom_app/android/local.properties
+audiocom_app/android/**/gradle-wrapper.jar
+audiocom_app/android/app/debug/
+audiocom_app/android/app/release/
+audiocom_app/ios/Pods/
+audiocom_app/ios/.symlinks/
+audiocom_app/ios/Flutter/Flutter.framework
+audiocom_app/ios/Flutter/Flutter.podspec
+audiocom_app/ios/Flutter/Generated.xcconfig
+audiocom_app/ios/Flutter/ephemeral/
+audiocom_app/ios/Runner.xcworkspace/xcshareddata/
+*.apk
+*.aab

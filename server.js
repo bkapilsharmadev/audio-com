@@ -76,8 +76,72 @@ function setupWebSocket(srv) {
     // Use noServer mode so we can manually route upgrades (needed for LiveKit proxy coexistence)
     const wss = new WebSocket.Server({ noServer: true });
 
+    // Network status thresholds (based on missed pings at 30-second intervals)
+    const NETWORK_STATUS = {
+        GOOD: 'good',           // 0-1 missed pings (0-30 seconds)
+        WEAK: 'weak',           // 2-3 missed pings (60-90 seconds)
+        DISCONNECTED: 'disconnected'  // 4+ missed pings (2+ minutes)
+    };
+
+    function getNetworkStatus(missedPings) {
+        if (missedPings <= 1) return NETWORK_STATUS.GOOD;
+        if (missedPings <= 3) return NETWORK_STATUS.WEAK;
+        return NETWORK_STATUS.DISCONNECTED;
+    }
+
+    // Ping clients every 30 seconds and track network status
+    // We do NOT auto-kick users - only update their network status
+    const pingInterval = setInterval(() => {
+        wss.clients.forEach((ws) => {
+            if (ws.userId) {
+                ws.missedPings = (ws.missedPings || 0) + 1;
+                
+                const newStatus = getNetworkStatus(ws.missedPings);
+                const user = users.get(ws.userId);
+                
+                // Broadcast status change to room members
+                if (user && user.roomId && user.networkStatus !== newStatus) {
+                    user.networkStatus = newStatus;
+                    broadcastToRoom(user.roomId, {
+                        type: 'user-network-status',
+                        userId: ws.userId,
+                        userName: user.name,
+                        networkStatus: newStatus
+                    });
+                    console.log(`User ${ws.userId} network status: ${newStatus} (${ws.missedPings} missed pings)`);
+                }
+            }
+            ws.ping();
+        });
+    }, 30000);
+
+    wss.on('close', () => {
+        clearInterval(pingInterval);
+    });
+
     wss.on('connection', (ws) => {
         let userId = null;
+        ws.missedPings = 0;
+        
+        // Handle pong responses - user is responsive
+        ws.on('pong', () => {
+            const prevMissedPings = ws.missedPings;
+            ws.missedPings = 0;
+            
+            // If status was degraded, broadcast recovery
+            if (prevMissedPings > 1 && ws.userId) {
+                const user = users.get(ws.userId);
+                if (user && user.roomId) {
+                    user.networkStatus = NETWORK_STATUS.GOOD;
+                    broadcastToRoom(user.roomId, {
+                        type: 'user-network-status',
+                        userId: ws.userId,
+                        userName: user.name,
+                        networkStatus: NETWORK_STATUS.GOOD
+                    });
+                }
+            }
+        });
         
         ws.on('message', (message) => {
             try {
@@ -134,6 +198,27 @@ function setupWebSocket(srv) {
                                 timestamp: new Date().toISOString()
                             });
                         }
+                        break;
+                    
+                    case 'heartbeat':
+                        // Client heartbeat - reset missed pings and update status
+                        const prevMissed = ws.missedPings;
+                        ws.missedPings = 0;
+                        
+                        // Broadcast recovery if status was degraded
+                        if (prevMissed > 1 && userId) {
+                            const hbUser = users.get(userId);
+                            if (hbUser && hbUser.roomId) {
+                                hbUser.networkStatus = 'good';
+                                broadcastToRoom(hbUser.roomId, {
+                                    type: 'user-network-status',
+                                    userId: userId,
+                                    userName: hbUser.name,
+                                    networkStatus: 'good'
+                                });
+                            }
+                        }
+                        ws.send(JSON.stringify({ type: 'heartbeat-ack' }));
                         break;
                     
                     case 'webrtc-join':
