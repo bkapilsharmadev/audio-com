@@ -1,5 +1,6 @@
 /**
  * MumbleClient - Handles connection to Mumble server via WebSocket
+ * Uses Web Worker for background operation (prevents throttling when tab is hidden)
  * Manages protocol messages and audio streaming
  */
 class MumbleClient {
@@ -8,10 +9,15 @@ class MumbleClient {
         this.username = options.username || 'Anonymous';
         
         this.ws = null;
+        this.wsWorker = null;  // Web Worker for background WebSocket
+        this.useWorker = this.supportsWorker();
         this.isConnected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 1000;
+        
+        // Keep-alive interval for when worker is not used
+        this.keepAliveInterval = null;
         
         // User and channel state
         this.currentUser = null;
@@ -36,6 +42,13 @@ class MumbleClient {
     }
 
     /**
+     * Check if Web Workers are supported
+     */
+    supportsWorker() {
+        return typeof Worker !== 'undefined';
+    }
+
+    /**
      * Get default WebSocket server URL
      */
     getDefaultServerUrl() {
@@ -50,13 +63,111 @@ class MumbleClient {
     async connect(username) {
         this.username = username;
         
+        if (this.useWorker) {
+            return this.connectWithWorker();
+        } else {
+            return this.connectDirect();
+        }
+    }
+
+    /**
+     * Connect using Web Worker (background-safe)
+     */
+    connectWithWorker() {
         return new Promise((resolve, reject) => {
             try {
-                console.log('Connecting to:', this.serverUrl);
+                console.log('🔧 Using Web Worker for WebSocket (background-safe mode)');
+                
+                // Create worker
+                this.wsWorker = new Worker('js/ws-worker.js');
+                
+                // Handle messages from worker
+                this.wsWorker.onmessage = (event) => {
+                    const { type, data, code, reason, error } = event.data;
+                    
+                    switch (type) {
+                        case 'connected':
+                            console.log('WebSocket connected (via Worker)');
+                            this.isConnected = true;
+                            this.reconnectAttempts = 0;
+                            
+                            // Register with the server
+                            this.send({
+                                type: 'register',
+                                userId: this.currentUser?.id
+                            });
+                            
+                            this.onConnect?.();
+                            resolve();
+                            break;
+                            
+                        case 'disconnected':
+                            console.log('WebSocket closed (via Worker):', code, reason);
+                            this.isConnected = false;
+                            this.onDisconnect?.();
+                            break;
+                            
+                        case 'message':
+                            this.handleMessage(typeof data === 'string' ? data : JSON.stringify(data));
+                            break;
+                            
+                        case 'error':
+                            console.error('WebSocket error (via Worker):', error);
+                            this.onError?.(new Error(error));
+                            if (!this.isConnected) {
+                                reject(new Error(error));
+                            }
+                            break;
+                            
+                        case 'reconnecting':
+                            console.log(`Reconnecting... attempt ${event.data.attempt}/${event.data.maxAttempts}`);
+                            break;
+                            
+                        case 'heartbeat':
+                            // Worker is alive and connection is healthy
+                            break;
+                            
+                        case 'pong':
+                            // Response to our ping
+                            break;
+                    }
+                };
+                
+                this.wsWorker.onerror = (error) => {
+                    console.error('Worker error:', error);
+                    // Fallback to direct connection
+                    this.useWorker = false;
+                    this.connectDirect().then(resolve).catch(reject);
+                };
+                
+                // Tell worker to connect
+                this.wsWorker.postMessage({
+                    type: 'connect',
+                    data: { url: this.serverUrl }
+                });
+                
+                // Setup visibility change handler to ping worker
+                this.setupVisibilityHandler();
+                
+            } catch (error) {
+                console.error('Worker creation failed, falling back to direct:', error);
+                this.useWorker = false;
+                this.connectDirect().then(resolve).catch(reject);
+            }
+        });
+    }
+
+    /**
+     * Direct WebSocket connection (fallback for browsers without Worker support)
+     */
+    connectDirect() {
+        return new Promise((resolve, reject) => {
+            try {
+                console.log('Connecting directly to:', this.serverUrl);
                 this.ws = new WebSocket(this.serverUrl);
                 
                 this.ws.onopen = () => {
-                    console.log('WebSocket connected');
+                    console.log('WebSocket connected (direct)');
                     this.isConnected = true;
                     this.reconnectAttempts = 0;
                     
@@ -66,6 +177,9 @@ class MumbleClient {
                         userId: this.currentUser?.id
                     });
                     
+                    // Start keep-alive for direct connections
+                    this.startKeepAlive();
+                    
                     this.onConnect?.();
                     resolve();
                 };
@@ -73,6 +187,7 @@ class MumbleClient {
                 this.ws.onclose = (event) => {
                     console.log('WebSocket closed:', event.code, event.reason);
                     this.isConnected = false;
+                    this.stopKeepAlive();
                     this.onDisconnect?.();
                     
                     // Attempt reconnection
@@ -94,6 +209,42 @@ class MumbleClient {
                 reject(error);
             }
         });
+    }
+
+    /**
+     * Setup visibility change handler to keep worker active
+     */
+    setupVisibilityHandler() {
+        document.addEventListener('visibilitychange', () => {
+            if (this.wsWorker && document.visibilityState === 'visible') {
+                // Ping worker when tab becomes visible to ensure it's still alive
+                this.wsWorker.postMessage({ type: 'ping' });
+            }
+        });
+    }
+
+    /**
+     * Start keep-alive interval for direct connections
+     */
+    startKeepAlive() {
+        this.stopKeepAlive();
+        
+        // Send heartbeat every 25 seconds
+        this.keepAliveInterval = setInterval(() => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                this.send({ type: 'heartbeat', timestamp: Date.now() });
+            }
+        }, 25000);
+    }
+
+    /**
+     * Stop keep-alive interval
+     */
+    stopKeepAlive() {
+        if (this.keepAliveInterval) {
+            clearInterval(this.keepAliveInterval);
+            this.keepAliveInterval = null;
+        }
     }
 
     /**
@@ -229,7 +380,13 @@ class MumbleClient {
      * Send message to server
      */
     send(message) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        if (this.useWorker && this.wsWorker) {
+            // Send via worker
+            this.wsWorker.postMessage({
+                type: 'send',
+                data: message
+            });
+        } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(message));
         } else {
             console.warn('WebSocket not connected, cannot send message');
@@ -286,6 +443,14 @@ class MumbleClient {
      */
     disconnect() {
         this.leaveChannel();
+        this.stopKeepAlive();
+        
+        // Disconnect via worker if using it
+        if (this.useWorker && this.wsWorker) {
+            this.wsWorker.postMessage({ type: 'disconnect' });
+            this.wsWorker.terminate();
+            this.wsWorker = null;
+        }
         
         if (this.ws) {
             this.ws.close(1000, 'User disconnected');

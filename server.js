@@ -184,6 +184,15 @@ function setupWebSocket(srv) {
                             }, ws.userId);
                         }
                         break;
+                    
+                    case 'heartbeat':
+                        // Respond to heartbeat to keep connection alive
+                        ws.send(JSON.stringify({
+                            type: 'heartbeat-ack',
+                            timestamp: data.timestamp,
+                            serverTime: Date.now()
+                        }));
+                        break;
                 }
             } catch (e) {
                 console.error('WebSocket message error:', e);

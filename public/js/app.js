@@ -1447,7 +1447,64 @@ function enableNoSleepFallback() {
         });
     }
     
+    // Also start silent audio context to prevent tab throttling
+    startSilentAudio();
+    
     console.log('🔒 NoSleep fallback enabled');
+}
+
+/**
+ * Start silent audio playback to prevent browser from throttling the tab
+ * Browsers don't throttle tabs that are playing audio
+ */
+let silentAudioContext = null;
+let silentAudioInterval = null;
+
+function startSilentAudio() {
+    stopSilentAudio();
+    
+    try {
+        silentAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Create a silent oscillator
+        const oscillator = silentAudioContext.createOscillator();
+        const gainNode = silentAudioContext.createGain();
+        
+        // Set gain to essentially zero (inaudible)
+        gainNode.gain.value = 0.001;
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(silentAudioContext.destination);
+        
+        oscillator.start();
+        
+        // Periodically "tickle" the audio context to keep it alive
+        silentAudioInterval = setInterval(() => {
+            if (silentAudioContext && silentAudioContext.state === 'suspended') {
+                silentAudioContext.resume();
+            }
+        }, 10000);
+        
+        console.log('🔊 Silent audio context started (prevents tab throttling)');
+    } catch (e) {
+        console.warn('Could not start silent audio:', e);
+    }
+}
+
+function stopSilentAudio() {
+    if (silentAudioInterval) {
+        clearInterval(silentAudioInterval);
+        silentAudioInterval = null;
+    }
+    
+    if (silentAudioContext) {
+        try {
+            silentAudioContext.close();
+        } catch (e) {
+            // Ignore
+        }
+        silentAudioContext = null;
+    }
 }
 
 /**
@@ -1460,6 +1517,8 @@ function disableNoSleepFallback() {
         video.remove();
         console.log('🔓 NoSleep fallback disabled');
     }
+    
+    stopSilentAudio();
 }
 
 /**
