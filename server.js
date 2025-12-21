@@ -148,25 +148,21 @@ function setupWebSocket(srv) {
         ws.on('pong', () => {
             const prevMissedPings = ws.missedPings;
             ws.missedPings = 0;
-            
             // Update lastSeen timestamp (memory and persisted)
             if (ws.userId) {
                 const user = users.get(ws.userId);
-                
                 // Log pong with user info
                 console.log(`[PONG] userId=${ws.userId} name=${user?.name || 'unknown'} prevMissedPings=${prevMissedPings}`);
-                
                 if (user) {
                     user.lastSeen = Date.now();
                     // Update persisted session lastSeen
                     sessionStore.touch(ws.userId);
                 }
             }
-            
-            // If status was degraded, broadcast recovery
-            if (prevMissedPings > 1 && ws.userId) {
+            // Always restore to good on pong (reconnect or recovery)
+            if (ws.userId) {
                 const user = users.get(ws.userId);
-                if (user && user.roomId) {
+                if (user && user.roomId && user.networkStatus !== NETWORK_STATUS.GOOD) {
                     user.networkStatus = NETWORK_STATUS.GOOD;
                     broadcastToRoom(user.roomId, {
                         type: 'user-network-status',
@@ -174,6 +170,7 @@ function setupWebSocket(srv) {
                         userName: user.name,
                         networkStatus: NETWORK_STATUS.GOOD
                     });
+                    console.log(`[WS] Marked user as reconnected: userId=${ws.userId} name=${user.name}`);
                 }
             }
         });
@@ -254,14 +251,13 @@ function setupWebSocket(srv) {
                                 userId,
                                 userName: leaveUser.name
                             });
-                            
                             // Actually remove user from room
                             const leaveRoom = rooms.get(data.roomId);
                             if (leaveRoom) {
                                 leaveRoom.users.delete(userId);
                             }
                             leaveUser.roomId = null;
-                            
+                            leaveUser.networkStatus = 'left';
                             // Update persisted session (no room)
                             sessionStore.save({
                                 userId: leaveUser.id,
@@ -269,7 +265,6 @@ function setupWebSocket(srv) {
                                 roomId: null,
                                 lastSeen: Date.now()
                             });
-                            
                             console.log(`✓ User ${leaveUser.name} left room ${data.roomId}`);
                         }
                         break;
@@ -415,27 +410,19 @@ function setupWebSocket(srv) {
             if (userId) {
                 const user = users.get(userId);
                 if (user) {
-                    // Mark as disconnected but DON'T delete immediately
-                    // Let the cleanup timer handle removal after timeout
-                    // This allows reconnection within the grace period
-                    user.networkStatus = 'disconnected';
-                    user.lastSeen = Date.now();
-                    
-                    // IMPORTANT: Also update persisted session's lastSeen
-                    // so it doesn't get cleaned up during reconnection
-                    sessionStore.touch(userId);
-                    
-                    // Broadcast disconnection status to room
+                    // If user is still in a room, mark as reconnecting (network issue)
                     if (user.roomId) {
+                        user.networkStatus = 'reconnecting';
                         broadcastToRoom(user.roomId, {
                             type: 'user-network-status',
                             userId,
                             userName: user.name,
-                            networkStatus: 'disconnected'
+                            networkStatus: 'reconnecting'
                         });
+                        console.log(`[WS] Marked user as reconnecting: userId=${userId} name=${user.name}`);
                     }
-                    
-                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 60 sec if no reconnect`);
+                    user.lastSeen = Date.now();
+                    sessionStore.touch(userId);
                 }
             }
         });

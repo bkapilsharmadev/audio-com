@@ -89,6 +89,9 @@ class WebSocketService {
           _handleDisconnect();
         },
       );
+
+      // Notify UI that current user is back to good
+      _handleReconnect();
     } catch (e) {
       print('WebSocket connection failed: $e');
       _handleDisconnect();
@@ -233,7 +236,23 @@ class WebSocketService {
     if (_isConnected) {
       _isConnected = false;
       _connectionStateController.add(false);
+      // Notify UI that current user is reconnecting
+      _userNetworkStatusController.add({
+        'userId': _userId,
+        'userName': '',
+        'networkStatus': 'reconnecting',
+      });
     }
+  }
+
+  /// Call this after a successful reconnect (in connect)
+  void _handleReconnect() {
+    // Notify UI that current user is back to good
+    _userNetworkStatusController.add({
+      'userId': _userId,
+      'userName': '',
+      'networkStatus': 'good',
+    });
   }
 
   void dispose() {
