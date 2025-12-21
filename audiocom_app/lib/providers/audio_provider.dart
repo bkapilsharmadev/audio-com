@@ -359,6 +359,11 @@ class AudioProvider extends ChangeNotifier {
     }
     
     try {
+      // IMPORTANT: First join the room via API - this broadcasts 'user-joined' to others
+      print('📡 Calling joinRoom API to notify other users...');
+      await _apiService.joinRoom(_lastUserId!, _lastRoomId!);
+      
+      // Now connect to LiveKit for voice
       final success = await joinVoice(
         _lastRoomId!,
         _lastUserId!,
@@ -372,6 +377,22 @@ class AudioProvider extends ChangeNotifier {
       } else {
         print('✗ Automatic voice rejoin failed');
         _pendingVoiceRejoin = false;  // Don't retry forever
+      }
+    } on ApiException catch (e) {
+      print('✗ Automatic voice rejoin API error: $e');
+      _pendingVoiceRejoin = false;
+      
+      if (e.isSessionExpired) {
+        // Session was cleaned up due to long disconnection
+        // Clear stored room info - user needs to rejoin manually
+        _lastRoomId = null;
+        _lastUserId = null;
+        _lastUserName = null;
+        _lastRoomName = null;
+        _error = 'Session expired. Please rejoin the room.';
+        print('⚠️ Session expired - user needs to rejoin manually');
+      } else {
+        _error = 'Failed to rejoin: ${e.message}';
       }
     } catch (e) {
       print('✗ Automatic voice rejoin error: $e');

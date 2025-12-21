@@ -172,10 +172,22 @@ class ApiService {
       if (response.body.isEmpty) return {};
       return jsonDecode(response.body);
     } else {
-      final error = response.body.isNotEmpty
-          ? jsonDecode(response.body)['error'] ?? 'Unknown error'
-          : 'Request failed with status ${response.statusCode}';
-      throw ApiException(error, response.statusCode);
+      String error = 'Unknown error';
+      String? code;
+      
+      if (response.body.isNotEmpty) {
+        try {
+          final data = jsonDecode(response.body);
+          error = data['error'] ?? 'Unknown error';
+          code = data['code'];
+        } catch (_) {
+          error = 'Request failed with status ${response.statusCode}';
+        }
+      } else {
+        error = 'Request failed with status ${response.statusCode}';
+      }
+      
+      throw ApiException(error, response.statusCode, code: code);
     }
   }
 
@@ -187,9 +199,13 @@ class ApiService {
 class ApiException implements Exception {
   final String message;
   final int statusCode;
+  final String? code;
 
-  ApiException(this.message, this.statusCode);
+  ApiException(this.message, this.statusCode, {this.code});
+
+  /// Check if this is a session expired error
+  bool get isSessionExpired => code == 'SESSION_EXPIRED';
 
   @override
-  String toString() => 'ApiException: $message (status: $statusCode)';
+  String toString() => 'ApiException: $message (status: $statusCode, code: $code)';
 }

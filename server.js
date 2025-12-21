@@ -110,15 +110,23 @@ function setupWebSocket(srv) {
                 const newStatus = getNetworkStatus(ws.missedPings);
                 
                 // Broadcast status change to room members
+                // BUT: Don't downgrade from 'reconnecting' to 'weak' (LiveKit webhook takes priority)
+                // Only allow: good → weak → disconnected (forward progression)
+                // Recovery (back to good) only happens via pong or participant_joined
                 if (user && user.roomId && user.networkStatus !== newStatus) {
-                    user.networkStatus = newStatus;
-                    broadcastToRoom(user.roomId, {
-                        type: 'user-network-status',
-                        userId: ws.userId,
-                        userName: user.name,
-                        networkStatus: newStatus
-                    });
-                    console.log(`User ${ws.userId} network status: ${newStatus} (${ws.missedPings} missed pings)`);
+                    // Check if this would be a downgrade from reconnecting
+                    const isDowngrade = user.networkStatus === 'reconnecting' && newStatus === 'weak';
+                    
+                    if (!isDowngrade) {
+                        user.networkStatus = newStatus;
+                        broadcastToRoom(user.roomId, {
+                            type: 'user-network-status',
+                            userId: ws.userId,
+                            userName: user.name,
+                            networkStatus: newStatus
+                        });
+                        console.log(`User ${ws.userId} network status: ${newStatus} (${ws.missedPings} missed pings)`);
+                    }
                 }
                 
                 // Log ping with user info
@@ -672,6 +680,17 @@ app.post('/api/livekit/token', async (req, res) => {
         return res.status(400).json({ error: 'roomId and userId are required' });
     }
     
+    // Validate user session exists
+    const user = users.get(userId);
+    if (!user) {
+        return res.status(401).json({ error: 'Session expired. Please re-register.', code: 'SESSION_EXPIRED' });
+    }
+    
+    // Validate user is in the requested room
+    if (user.roomId !== roomId) {
+        return res.status(403).json({ error: 'You must join the room before connecting to voice.' });
+    }
+    
     try {
         // Create access token
         const token = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
@@ -1210,7 +1229,7 @@ app.post('/api/users/:userId/join/:roomId', (req, res) => {
     
     const user = users.get(userId);
     if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(401).json({ error: 'Session expired. Please re-register.', code: 'SESSION_EXPIRED' });
     }
     
     const room = rooms.get(roomId);
