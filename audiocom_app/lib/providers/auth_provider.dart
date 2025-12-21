@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import '../models/user.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
@@ -14,6 +15,7 @@ class AuthProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   bool _isInitialized = false;
+  String? _stableUserId; // Persistent device identity
 
   AuthProvider({
     ApiService? apiService,
@@ -29,14 +31,25 @@ class AuthProvider extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
   WebSocketService get wsService => _wsService;
 
-  /// Initialize - always start fresh (no auto-login)
+  /// Initialize - load stable userId, but don't auto-login
   Future<void> initialize() async {
     if (_isInitialized) return;
     
     try {
-      // Clear any saved session data - always require fresh login
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('userId');
+      
+      // Get or create stable userId (persists forever)
+      _stableUserId = prefs.getString('stableUserId');
+      if (_stableUserId == null) {
+        _stableUserId = const Uuid().v4();
+        await prefs.setString('stableUserId', _stableUserId!);
+        print('Generated new stableUserId: $_stableUserId');
+      } else {
+        print('Loaded existing stableUserId: $_stableUserId');
+      }
+      
+      // Clear session data - user must enter credentials
+      // but keep stableUserId for reconnection identity
       await prefs.remove('userName');
       await prefs.remove('userToken');
       
@@ -49,19 +62,19 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Register a new user
+  /// Register a new user (or reconnect with existing identity)
   Future<bool> register(String name, String serverPassword) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final user = await _apiService.register(name, serverPassword);
+      // Pass stableUserId to server for session ownership
+      final user = await _apiService.register(name, serverPassword, userId: _stableUserId);
       _currentUser = user;
       
-      // Save session
+      // Save session info (not the userId - that's already stable)
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('userId', user.id);
       await prefs.setString('userName', user.name);
       if (user.token != null) {
         await prefs.setString('userToken', user.token!);
@@ -98,9 +111,8 @@ class AuthProvider extends ChangeNotifier {
 
     await _wsService.disconnect();
     
-    // Clear saved session
+    // Clear session data but keep stableUserId
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('userId');
     await prefs.remove('userName');
     await prefs.remove('userToken');
     

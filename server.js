@@ -128,6 +128,14 @@ function setupWebSocket(srv) {
             const prevMissedPings = ws.missedPings;
             ws.missedPings = 0;
             
+            // Update lastSeen timestamp
+            if (ws.userId) {
+                const user = users.get(ws.userId);
+                if (user) {
+                    user.lastSeen = Date.now();
+                }
+            }
+            
             // If status was degraded, broadcast recovery
             if (prevMissedPings > 1 && ws.userId) {
                 const user = users.get(ws.userId);
@@ -151,6 +159,21 @@ function setupWebSocket(srv) {
                     case 'register':
                         userId = data.userId;
                         ws.userId = userId;
+                        
+                        // Close any existing socket for this userId (session takeover)
+                        wss.clients.forEach(client => {
+                            if (client !== ws && client.userId === userId && client.readyState === WebSocket.OPEN) {
+                                console.log(`Closing old socket for user ${userId} (session takeover)`);
+                                client.close(1000, 'Session replaced');
+                            }
+                        });
+                        
+                        // Update user's lastSeen and network status
+                        const regUser = users.get(userId);
+                        if (regUser) {
+                            regUser.lastSeen = Date.now();
+                            regUser.networkStatus = 'good';
+                        }
                         break;
                         
                     case 'speaking':
@@ -663,9 +686,9 @@ app.get('/api/users/:id', (req, res) => {
     });
 });
 
-// Register user
+// Register user (or reconnect with existing userId)
 app.post('/api/users/register', (req, res) => {
-    const { name, serverPassword } = req.body;
+    const { name, serverPassword, userId: clientUserId } = req.body;
     
     // Validate server password first
     if (!serverPassword || serverPassword !== SERVER_PASSWORD) {
@@ -676,31 +699,104 @@ app.post('/api/users/register', (req, res) => {
         return res.status(400).json({ error: 'Username is required' });
     }
     
+    const trimmedName = name.trim();
+    
+    // Check if client is reconnecting with existing userId
+    if (clientUserId) {
+        const existingUser = users.get(clientUserId);
+        
+        if (existingUser) {
+            // Same userId reconnecting - allow session takeover
+            console.log(`✓ User reconnecting: ${existingUser.name} (${clientUserId})`);
+            
+            // Update name if changed (optional)
+            existingUser.name = trimmedName;
+            existingUser.connectedAt = new Date();
+            existingUser.networkStatus = 'good';
+            
+            return res.status(200).json({
+                id: existingUser.id,
+                name: existingUser.name,
+                roomId: existingUser.roomId,
+                token: uuidv4(),
+                reconnected: true
+            });
+        }
+        
+        // userId provided but not found - check if username is taken by DIFFERENT userId
+        const userWithSameName = Array.from(users.values()).find(
+            u => u.name.toLowerCase() === trimmedName.toLowerCase()
+        );
+        
+        if (userWithSameName) {
+            // Username taken by different userId - check if that user is stale (disconnected > 2 min)
+            const isStale = userWithSameName.networkStatus === 'disconnected' || 
+                           (userWithSameName.lastSeen && Date.now() - userWithSameName.lastSeen > 2 * 60 * 1000);
+            
+            if (isStale) {
+                // Allow takeover - remove stale user
+                console.log(`✓ Stale user cleanup: ${userWithSameName.name} (${userWithSameName.id})`);
+                if (userWithSameName.roomId) {
+                    const room = rooms.get(userWithSameName.roomId);
+                    if (room) room.users.delete(userWithSameName.id);
+                }
+                users.delete(userWithSameName.id);
+            } else {
+                return res.status(409).json({ error: 'Username already taken' });
+            }
+        }
+        
+        // Create new user with client-provided userId
+        const user = {
+            id: clientUserId,
+            name: trimmedName,
+            roomId: null,
+            isMuted: false,
+            isDeafened: false,
+            isSpeaking: false,
+            networkStatus: 'good',
+            connectedAt: new Date(),
+            lastSeen: Date.now()
+        };
+        
+        users.set(user.id, user);
+        console.log(`✓ User registered with client userId: ${user.name} (${user.id})`);
+        
+        return res.status(201).json({
+            id: user.id,
+            name: user.name,
+            roomId: user.roomId,
+            token: uuidv4()
+        });
+    }
+    
+    // No userId provided - legacy registration (generate new userId)
     // Check for duplicate names
-    const existingUser = Array.from(users.values()).find(u => u.name.toLowerCase() === name.toLowerCase());
+    const existingUser = Array.from(users.values()).find(u => u.name.toLowerCase() === trimmedName.toLowerCase());
     if (existingUser) {
         return res.status(409).json({ error: 'Username already taken' });
     }
     
     const user = {
         id: uuidv4(),
-        name: name.trim(),
-        roomId: null,  // No default room - user must select one
+        name: trimmedName,
+        roomId: null,
         isMuted: false,
         isDeafened: false,
         isSpeaking: false,
-        connectedAt: new Date()
+        networkStatus: 'good',
+        connectedAt: new Date(),
+        lastSeen: Date.now()
     };
     
     users.set(user.id, user);
-    
-    // Don't auto-add to lobby - user must select a channel
+    console.log(`✓ User registered (new): ${user.name} (${user.id})`);
     
     res.status(201).json({
         id: user.id,
         name: user.name,
         roomId: user.roomId,
-        token: uuidv4() // Simple token for session
+        token: uuidv4()
     });
 });
 

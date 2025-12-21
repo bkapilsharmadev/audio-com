@@ -33,15 +33,22 @@ class ApiService {
     return _handleResponse(response);
   }
 
-  /// Register a new user
-  Future<User> register(String name, String serverPassword) async {
+  /// Register a new user (or reconnect with existing userId)
+  Future<User> register(String name, String serverPassword, {String? userId}) async {
+    final body = <String, dynamic>{
+      'name': name,
+      'serverPassword': serverPassword,
+    };
+    
+    // Include userId for session identity/reconnection
+    if (userId != null) {
+      body['userId'] = userId;
+    }
+    
     final response = await _client.post(
       Uri.parse('$baseUrl${ApiConfig.register}'),
       headers: _headers,
-      body: jsonEncode({
-        'name': name,
-        'serverPassword': serverPassword,
-      }),
+      body: jsonEncode(body),
     );
     final data = _handleResponse(response);
     return User.fromJson(data);
