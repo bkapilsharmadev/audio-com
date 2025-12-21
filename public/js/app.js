@@ -15,6 +15,7 @@ const app = {
     audioHandler: null,
     mumbleClient: null,
     livekitVoice: null,  // LiveKit SFU for voice
+    wakeLock: null,       // Screen Wake Lock
     
     // DOM elements cache
     elements: {}
@@ -72,6 +73,7 @@ function cacheElements() {
         enableAudioBtn: document.getElementById('enable-audio-btn'),
         deafenBtn: document.getElementById('deafen-btn'),
         videoBtn: document.getElementById('video-btn'),
+        screenShareBtn: document.getElementById('screen-share-btn'),
         disconnectBtn: document.getElementById('disconnect-btn'),
         connectionIndicator: document.getElementById('connection-indicator'),
         connectionText: document.getElementById('connection-text'),
@@ -166,6 +168,7 @@ function setupEventListeners() {
     app.elements.enableAudioBtn.addEventListener('touchstart', enableAudioHandler);
     app.elements.deafenBtn.addEventListener('click', toggleDeafen);
     app.elements.videoBtn?.addEventListener('click', toggleVideo);
+    app.elements.screenShareBtn?.addEventListener('click', toggleScreenShare);
     app.elements.disconnectBtn.addEventListener('click', handleDisconnect);
     
     // Chat
@@ -598,6 +601,9 @@ async function joinRoom(roomId, password = null) {
         // Initialize LiveKit voice for this room
         initializeLiveKitVoice(roomId);
         
+        // Request Wake Lock to prevent screen from sleeping during call
+        requestWakeLock();
+        
         showNotification(`Joined ${data.roomName}`, 'success');
         
     } catch (error) {
@@ -783,6 +789,27 @@ async function initializeLiveKitVoice(roomId) {
         app.livekitVoice.onVideoTrackUnsubscribed = (track, participant) => {
             console.log('Video: track unsubscribed from:', participant.identity);
             removeVideoTile(participant.identity);
+        };
+        
+        // Handle screen share track subscriptions
+        app.livekitVoice.onScreenTrackSubscribed = (track, participant) => {
+            console.log('Screen: track subscribed from:', participant.identity);
+            addRemoteScreenShareTile(track, participant);
+        };
+        
+        app.livekitVoice.onScreenTrackUnsubscribed = (track, participant) => {
+            console.log('Screen: track unsubscribed from:', participant.identity);
+            removeVideoTile(`${participant.identity}-screen`);
+        };
+        
+        // Handle screen share state changes (for button UI)
+        app.livekitVoice.onScreenShareStateChanged = (isSharing) => {
+            const screenShareBtn = app.elements.screenShareBtn;
+            if (screenShareBtn) {
+                screenShareBtn.classList.toggle('active', isSharing);
+                screenShareBtn.querySelector('.icon-screen-share')?.classList.toggle('hidden', isSharing);
+                screenShareBtn.querySelector('.icon-screen-share-off')?.classList.toggle('hidden', !isSharing);
+            }
         };
         
         // Connect to LiveKit room
@@ -1237,6 +1264,244 @@ function updateVideoGridLayout() {
 }
 
 /**
+ * Toggle screen sharing
+ */
+async function toggleScreenShare() {
+    if (!app.livekitVoice) {
+        showNotification('Voice not connected', 'error');
+        return;
+    }
+    
+    const screenShareBtn = app.elements.screenShareBtn;
+    if (!screenShareBtn) return;
+    
+    try {
+        // Toggle screen share
+        const success = await app.livekitVoice.toggleScreenShare();
+        
+        if (success !== undefined) {
+            const isScreenSharing = app.livekitVoice.isScreenSharing;
+            screenShareBtn.classList.toggle('active', isScreenSharing);
+            screenShareBtn.querySelector('.icon-screen-share')?.classList.toggle('hidden', isScreenSharing);
+            screenShareBtn.querySelector('.icon-screen-share-off')?.classList.toggle('hidden', !isScreenSharing);
+            
+            // Add/remove screen share tile
+            if (isScreenSharing && app.livekitVoice.localScreenTrack) {
+                addLocalScreenShareTile();
+            } else {
+                removeVideoTile(`${app.user.id}-screen`);
+            }
+            
+            showNotification(isScreenSharing ? '🖥️ Screen sharing started' : '🖥️ Screen sharing stopped', 'success');
+        }
+    } catch (error) {
+        console.error('Screen share error:', error);
+        showNotification('Failed to share screen: ' + error.message, 'error');
+    }
+}
+
+/**
+ * Add local screen share tile to video grid
+ */
+function addLocalScreenShareTile() {
+    if (!app.livekitVoice?.localScreenTrack) return;
+    
+    const videoGrid = app.elements.videoGrid;
+    if (!videoGrid) return;
+    
+    // Remove existing screen share tile
+    removeVideoTile(`${app.user.id}-screen`);
+    
+    const tile = document.createElement('div');
+    tile.className = 'video-tile local screen-share';
+    tile.id = `video-tile-${app.user.id}-screen`;
+    tile.dataset.participantId = `${app.user.id}-screen`;
+    
+    const video = document.createElement('video');
+    video.id = `video-${app.user.id}-screen`;
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    
+    // Attach the local screen share track
+    app.livekitVoice.localScreenTrack.attach(video);
+    
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'video-name';
+    nameLabel.innerHTML = `<span class="screen-share-icon">🖥️</span> ${app.user.name} (Screen)`;
+    
+    tile.appendChild(video);
+    tile.appendChild(nameLabel);
+    videoGrid.appendChild(tile);
+    
+    // Show video grid
+    videoGrid.classList.remove('hidden');
+    updateVideoGridLayout();
+}
+
+/**
+ * Add remote screen share tile to video grid
+ */
+function addRemoteScreenShareTile(track, participant) {
+    const videoGrid = app.elements.videoGrid;
+    if (!videoGrid) return;
+    
+    // Remove existing screen share tile for this participant
+    removeVideoTile(`${participant.identity}-screen`);
+    
+    const tile = document.createElement('div');
+    tile.className = 'video-tile screen-share featured';  // Featured class makes it larger
+    tile.id = `video-tile-${participant.identity}-screen`;
+    tile.dataset.participantId = `${participant.identity}-screen`;
+    
+    const video = document.createElement('video');
+    video.id = `video-${participant.identity}-screen`;
+    video.autoplay = true;
+    video.playsInline = true;
+    
+    // Attach the remote screen share track
+    track.attach(video);
+    
+    const nameLabel = document.createElement('div');
+    nameLabel.className = 'video-name';
+    nameLabel.innerHTML = `<span class="screen-share-icon">🖥️</span> ${participant.name || participant.identity} (Screen)`;
+    
+    tile.appendChild(video);
+    tile.appendChild(nameLabel);
+    
+    // Insert screen share tiles at the beginning (featured position)
+    videoGrid.insertBefore(tile, videoGrid.firstChild);
+    
+    // Show video grid
+    videoGrid.classList.remove('hidden');
+    updateVideoGridLayout();
+    
+    showNotification(`${participant.name || participant.identity} is sharing their screen`, 'info');
+}
+
+/**
+ * Request Wake Lock to prevent screen from sleeping during call
+ * Uses native Wake Lock API with fallback for unsupported browsers
+ */
+async function requestWakeLock() {
+    try {
+        // Check if Wake Lock API is supported
+        if ('wakeLock' in navigator) {
+            // Release existing lock first
+            if (app.wakeLock) {
+                await app.wakeLock.release();
+            }
+            
+            // Request a new wake lock
+            app.wakeLock = await navigator.wakeLock.request('screen');
+            
+            console.log('🔒 Wake Lock acquired - screen will stay on during call');
+            
+            // Handle visibility change - re-acquire wake lock when page becomes visible
+            app.wakeLock.addEventListener('release', () => {
+                console.log('🔓 Wake Lock released');
+            });
+            
+            // Re-acquire wake lock on visibility change
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+            
+        } else {
+            // Fallback: Use a hidden video element to keep screen awake (iOS workaround)
+            console.log('⚠️ Wake Lock API not supported, using video fallback');
+            enableNoSleepFallback();
+        }
+    } catch (error) {
+        console.warn('Wake Lock request failed, trying fallback:', error.message);
+        // Fallback for browsers that support Wake Lock but fail (e.g., battery saver mode)
+        enableNoSleepFallback();
+    }
+}
+
+/**
+ * NoSleep fallback using a silent video loop for browsers without Wake Lock API
+ */
+function enableNoSleepFallback() {
+    // Remove existing fallback if any
+    disableNoSleepFallback();
+    
+    // Create a tiny, silent video that loops to keep the screen awake
+    const video = document.createElement('video');
+    video.id = 'nosleep-video';
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
+    video.setAttribute('loop', '');
+    video.style.cssText = 'position:fixed;top:-1px;left:-1px;width:1px;height:1px;opacity:0.01;pointer-events:none;';
+    
+    // Use a tiny webm video (base64 encoded 1x1 pixel, ~1 second)
+    // This is a minimal valid webm file
+    video.src = 'data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////FUmpZpkq17GDD0JATYCGQ2hyb21lV0WGQ2hyb21lFlSua7+uvdeBAXPFhg5LdkFtYXZpbmdAQ0BCwAEAAAAAAAARTZt0pJKJjsKJj7LNjJCJHPEAAAAAAABoZ2FuAAAAAAAAAABIYWxleSBEaWdnaW5zAAAAAAAAAAAAAAAAZW5jb2RlZCBieSBMYXZjIDU4LjEzNC4xMDABAAAAAAAAFgA//////////xOhggBAAABFBgRERkdISktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8A';
+    
+    document.body.appendChild(video);
+    
+    // Play the video
+    const playPromise = video.play();
+    if (playPromise) {
+        playPromise.catch(() => {
+            // Autoplay blocked, will work after user interaction
+            console.log('NoSleep video autoplay blocked, will activate on interaction');
+        });
+    }
+    
+    console.log('🔒 NoSleep fallback enabled');
+}
+
+/**
+ * Disable NoSleep fallback
+ */
+function disableNoSleepFallback() {
+    const video = document.getElementById('nosleep-video');
+    if (video) {
+        video.pause();
+        video.remove();
+        console.log('🔓 NoSleep fallback disabled');
+    }
+}
+
+/**
+ * Release Wake Lock
+ */
+async function releaseWakeLock() {
+    try {
+        if (app.wakeLock) {
+            await app.wakeLock.release();
+            app.wakeLock = null;
+            console.log('🔓 Wake Lock released - screen can sleep now');
+        }
+        
+        // Also disable fallback if active
+        disableNoSleepFallback();
+        
+        // Remove visibility change handler
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        
+    } catch (error) {
+        console.warn('Wake Lock release failed:', error);
+    }
+}
+
+/**
+ * Handle visibility change - re-acquire wake lock when page becomes visible
+ */
+async function handleVisibilityChange() {
+    if (document.visibilityState === 'visible' && app.user?.roomId && app.livekitVoice?.isConnected) {
+        // Re-acquire wake lock when coming back to the app
+        if (!app.wakeLock || app.wakeLock.released) {
+            try {
+                app.wakeLock = await navigator.wakeLock.request('screen');
+                console.log('🔒 Wake Lock re-acquired after visibility change');
+            } catch (error) {
+                console.warn('Wake Lock re-acquisition failed:', error);
+            }
+        }
+    }
+}
+
+/**
  * Handle disconnect
  */
 async function handleDisconnect() {
@@ -1249,6 +1514,9 @@ async function handleDisconnect() {
             app.livekitVoice.disconnect();
             app.livekitVoice = null;
         }
+        
+        // Release Wake Lock
+        releaseWakeLock();
         
         // Disconnect WebSocket
         app.mumbleClient?.disconnect();

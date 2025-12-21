@@ -461,6 +461,11 @@ body::before {
     background: var(--success);
 }
 
+/* Screen share button - active state is blue (sharing) */
+#screen-share-btn.active {
+    background: var(--info);
+}
+
 .voice-btn.disconnect {
     background: transparent;
     border: 2px solid var(--danger);
@@ -618,6 +623,26 @@ body::before {
 .video-tile.speaking {
     border-color: var(--success);
     box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+/* Screen Share Tiles */
+.video-tile.screen-share {
+    border-color: var(--info);
+}
+
+.video-tile.screen-share.featured {
+    grid-column: 1 / -1;
+    max-height: 60vh;
+    aspect-ratio: auto;
+}
+
+.video-tile.screen-share video {
+    object-fit: contain;
+    background: #000;
+}
+
+.video-tile .screen-share-icon {
+    margin-right: 6px;
 }
 
 /* Voice Grid */
