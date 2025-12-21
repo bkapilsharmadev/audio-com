@@ -91,7 +91,10 @@ class LivekitService {
 
   /// Enable/disable microphone
   Future<void> setMicrophoneEnabled(bool enabled) async {
-    if (_localParticipant == null) return;
+    if (_localParticipant == null) {
+      print('⚠ Cannot ${enabled ? "enable" : "disable"} microphone: no local participant');
+      return;
+    }
 
     try {
       await _localParticipant!.setMicrophoneEnabled(enabled);
@@ -100,6 +103,11 @@ class LivekitService {
     } catch (e) {
       print('Failed to ${enabled ? "enable" : "disable"} microphone: $e');
       _errorController.add('Microphone error: $e');
+      
+      // If enabling failed, reset the state
+      if (enabled) {
+        _isMicEnabled = false;
+      }
     }
   }
 
@@ -176,15 +184,51 @@ class LivekitService {
         _isConnected = false;
         _connectionStateController.add(false);
       })
-      ..on<RoomReconnectingEvent>((event) {
+      ..on<RoomReconnectingEvent>((event) async {
         print('⚠ Room reconnecting...');
         _reconnectingController.add(true);
+        
+        // Unpublish all local audio tracks to prevent "track is null" errors
+        // when LiveKit tries to rePublishAllTracks internally.
+        // We'll re-publish them after reconnection if needed.
+        if (_localParticipant != null) {
+          try {
+            final audioTracks = _localParticipant!.audioTrackPublications.toList();
+            for (final publication in audioTracks) {
+              if (publication.track != null) {
+                print('🔄 Unpublishing track before reconnect: ${publication.sid}');
+                await _localParticipant!.removePublishedTrack(publication.sid);
+              }
+            }
+          } catch (e) {
+            print('⚠ Error unpublishing tracks during reconnect: $e');
+          }
+        }
+        
+        _localParticipant = _room?.localParticipant;
       })
-      ..on<RoomReconnectedEvent>((event) {
+      ..on<RoomReconnectedEvent>((event) async {
         print('✓ Room reconnected');
         _isConnected = true;
         _reconnectingController.add(false);
         _connectionStateController.add(true);
+        
+        // Update local participant reference
+        _localParticipant = _room?.localParticipant;
+        
+        // Re-establish microphone state after reconnection
+        // Since we unpublished tracks during reconnecting, we need to re-enable if it was on
+        if (_isMicEnabled && _localParticipant != null) {
+          try {
+            // Small delay to ensure connection is fully established
+            await Future.delayed(const Duration(milliseconds: 500));
+            await _localParticipant!.setMicrophoneEnabled(true);
+            print('✓ Microphone re-enabled after reconnection');
+          } catch (e) {
+            print('⚠ Failed to re-enable microphone after reconnection: $e');
+            _errorController.add('Failed to re-enable microphone: $e');
+          }
+        }
       })
       ..on<ParticipantConnectedEvent>((event) {
         print('Participant joined: ${event.participant.identity}');

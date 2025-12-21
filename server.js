@@ -406,6 +406,10 @@ function setupWebSocket(srv) {
                     user.networkStatus = 'disconnected';
                     user.lastSeen = Date.now();
                     
+                    // IMPORTANT: Also update persisted session's lastSeen
+                    // so it doesn't get cleaned up during reconnection
+                    sessionStore.touch(userId);
+                    
                     // Broadcast disconnection status to room
                     if (user.roomId) {
                         broadcastToRoom(user.roomId, {
@@ -416,7 +420,7 @@ function setupWebSocket(srv) {
                         });
                     }
                     
-                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 30 sec if no reconnect`);
+                    console.log(`WebSocket closed for ${user.name} (${userId}) - marked disconnected, will cleanup in 60 sec if no reconnect`);
                 }
             }
         });
@@ -526,9 +530,10 @@ function restorePersistedSessions() {
 
 restorePersistedSessions();
 
-// Periodic cleanup of stale sessions (every 5 seconds, expire after 30 seconds)
+// Periodic cleanup of stale sessions (every 10 seconds, expire after 60 seconds)
+// 60 seconds gives enough time for mobile network reconnections
 setInterval(() => {
-    const removed = sessionStore.cleanup(30 * 1000);
+    const removed = sessionStore.cleanup(60 * 1000);
     
     // Also clean up in-memory state for removed sessions
     for (const { userId, username } of removed) {
