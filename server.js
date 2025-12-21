@@ -79,6 +79,13 @@ function setupWebSocket(srv) {
     // Use noServer mode so we can manually route upgrades (needed for LiveKit proxy coexistence)
     const wss = new WebSocket.Server({ noServer: true });
 
+    function logEvent(event, userId, extra = '') {
+        const user = users.get(userId);
+        const name = user ? user.name : 'unknown';
+        const tail = extra ? ` ${extra}` : '';
+        console.log(`[WS] ${event} userId=${userId} name=${name}${tail}`);
+    }
+
     // Network status thresholds (based on missed pings at 30-second intervals)
     const NETWORK_STATUS = {
         GOOD: 'good',           // 0-1 missed pings (0-30 seconds)
@@ -164,6 +171,7 @@ function setupWebSocket(srv) {
                     case 'register':
                         userId = data.userId;
                         ws.userId = userId;
+                        logEvent('register', userId);
                         
                         // Close any existing socket for this userId (session takeover)
                         wss.clients.forEach(client => {
@@ -184,11 +192,27 @@ function setupWebSocket(srv) {
                     case 'speaking':
                         const user = users.get(userId);
                         if (user) {
+                            logEvent('speaking', userId, `isSpeaking=${data.isSpeaking}`);
                             user.isSpeaking = data.isSpeaking;
+                            // Broadcast to entire room INCLUDING sender so local UI updates immediately
                             broadcastToRoom(user.roomId, {
                                 type: 'user-speaking',
                                 userId,
                                 isSpeaking: data.isSpeaking
+                            });
+                        }
+                        break;
+
+                    case 'network-status':
+                        const netUser = users.get(userId);
+                        if (netUser && netUser.roomId) {
+                            logEvent('network-status', userId, `status=${data.networkStatus}`);
+                            netUser.networkStatus = data.networkStatus;
+                            broadcastToRoom(netUser.roomId, {
+                                type: 'user-network-status',
+                                userId,
+                                userName: netUser.name,
+                                networkStatus: data.networkStatus
                             }, userId);
                         }
                         break;
@@ -196,6 +220,7 @@ function setupWebSocket(srv) {
                     case 'join-room':
                         const joinUser = users.get(userId);
                         if (joinUser) {
+                            logEvent('join-room', userId, `roomId=${data.roomId}`);
                             broadcastToRoom(data.roomId, {
                                 type: 'user-joined',
                                 userId,
@@ -207,6 +232,7 @@ function setupWebSocket(srv) {
                     case 'leave-room':
                         const leaveUser = users.get(userId);
                         if (leaveUser) {
+                            logEvent('leave-room', userId, `roomId=${data.roomId}`);
                             // Broadcast to room BEFORE removing
                             broadcastToRoom(data.roomId, {
                                 type: 'user-left',
@@ -236,6 +262,7 @@ function setupWebSocket(srv) {
                     case 'chat-message':
                         const chatUser = users.get(userId);
                         if (chatUser) {
+                            logEvent('chat-message', userId, `roomId=${chatUser.roomId}`);
                             broadcastToRoom(chatUser.roomId, {
                                 type: 'chat-message',
                                 userId,

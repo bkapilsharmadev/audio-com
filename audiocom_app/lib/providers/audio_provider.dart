@@ -18,6 +18,7 @@ class AudioProvider extends ChangeNotifier {
   bool _isMuted = true;  // Start muted by default
   bool _isDeafened = false;
   bool _isConnecting = false;
+  bool _isReconnecting = false;
   String? _error;
   int _audioBitrateKbps = 32; // Current bitrate setting
   
@@ -30,6 +31,8 @@ class AudioProvider extends ChangeNotifier {
   StreamSubscription? _participantJoinedSub;
   StreamSubscription? _participantLeftSub;
   StreamSubscription? _errorSub;
+  StreamSubscription? _connectionStateSub;
+  StreamSubscription? _reconnectingSub;
 
   AudioProvider({
     ApiService? apiService,
@@ -47,6 +50,7 @@ class AudioProvider extends ChangeNotifier {
   bool get isMuted => _isMuted;
   bool get isDeafened => _isDeafened;
   bool get isConnecting => _isConnecting;
+  bool get isReconnecting => _isReconnecting;
   String? get error => _error;
   LivekitService get livekitService => _livekitService;
   int get audioBitrateKbps => _audioBitrateKbps;
@@ -112,6 +116,14 @@ class AudioProvider extends ChangeNotifier {
       
       // Keep screen on during call
       await WakelockPlus.enable();
+
+      // Sync initial state (muted by default) to server so others see correct icons
+      await _apiService.updateUserState(
+        _currentUserId!,
+        isMuted: _isMuted,
+        isDeafened: _isDeafened,
+        isSpeaking: false,
+      );
       
       notifyListeners();
       return true;
@@ -159,6 +171,11 @@ class AudioProvider extends ChangeNotifier {
       // Update server state
       if (_currentUserId != null) {
         await _apiService.updateUserState(_currentUserId!, isMuted: _isMuted);
+        // If muted, also clear speaking state on server immediately
+        if (_isMuted) {
+          _wsService.sendSpeakingState(false);
+          await _apiService.updateUserState(_currentUserId!, isSpeaking: false);
+        }
       }
       
       notifyListeners();
@@ -205,6 +222,14 @@ class AudioProvider extends ChangeNotifier {
   void _setupListeners() {
     _speakingChangedSub = _livekitService.onSpeakingChanged.listen((data) {
       // Handle speaking changes from LiveKit
+      final participantId = data['participantId'] as String?;
+      final isSpeaking = data['isSpeaking'] as bool? ?? false;
+      
+      // If this is the local user speaking, send to WebSocket server
+      // Note: LiveKit identity is set to userId, not userName
+      if (participantId != null && participantId == _currentUserId) {
+        _wsService.sendSpeakingState(isSpeaking);
+      }
       notifyListeners();
     });
 
@@ -220,6 +245,50 @@ class AudioProvider extends ChangeNotifier {
       _error = error;
       notifyListeners();
     });
+
+    // Listen for connection state changes (network disconnections)
+    _connectionStateSub = _livekitService.onConnectionStateChanged.listen((isConnected) {
+      if (!isConnected && _isInVoiceChannel && !_isReconnecting) {
+        // Network disconnection detected while in voice channel (and not already reconnecting)
+        print('⚠ LiveKit disconnected - network issue detected');
+        _isInVoiceChannel = false;
+        _isReconnecting = false;
+        _error = 'Disconnected from voice - network error';
+        
+        // Notify other users of disconnection
+        _wsService.sendNetworkStatus('disconnected');
+        
+        // Stop foreground service
+        ForegroundServiceHandler.stopService();
+        WakelockPlus.disable();
+        
+        notifyListeners();
+      } else if (isConnected && !_isInVoiceChannel && _currentRoomId != null) {
+        // Reconnected successfully
+        _isInVoiceChannel = true;
+        _isReconnecting = false;
+        _error = null;
+        
+        // Notify other users we're back online
+        _wsService.sendNetworkStatus('good');
+        
+        notifyListeners();
+      }
+    });
+
+    // Listen for reconnecting state
+    _reconnectingSub = _livekitService.onReconnecting.listen((isReconnecting) {
+      _isReconnecting = isReconnecting;
+      if (isReconnecting) {
+        _error = 'Reconnecting...';
+        // Notify other users we're having network issues (weak/reconnecting)
+        _wsService.sendNetworkStatus('weak');
+      } else {
+        _error = null;
+        // Will get 'good' status from connection state listener when fully reconnected
+      }
+      notifyListeners();
+    });
   }
 
   void clearError() {
@@ -233,6 +302,8 @@ class AudioProvider extends ChangeNotifier {
     _participantJoinedSub?.cancel();
     _participantLeftSub?.cancel();
     _errorSub?.cancel();
+    _connectionStateSub?.cancel();
+    _reconnectingSub?.cancel();
     _livekitService.dispose();
     _apiService.dispose();
     WakelockPlus.disable();

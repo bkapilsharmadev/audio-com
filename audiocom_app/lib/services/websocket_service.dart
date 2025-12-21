@@ -145,6 +145,14 @@ class WebSocketService {
     });
   }
 
+  /// Send network status update (good, weak, disconnected)
+  void sendNetworkStatus(String status) {
+    _send({
+      'type': 'network-status',
+      'networkStatus': status,
+    });
+  }
+
   void _send(Map<String, dynamic> data) {
     if (_channel != null && _isConnected) {
       _channel!.sink.add(jsonEncode(data));

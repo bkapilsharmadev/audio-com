@@ -124,24 +124,46 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           // Connection status
           Consumer<AudioProvider>(
             builder: (context, audio, _) {
+              Color statusColor;
+              IconData statusIcon;
+              String statusText;
+              
+              if (audio.isReconnecting) {
+                statusColor = Colors.orange;
+                statusIcon = Icons.wifi_off;
+                statusText = 'Reconnecting...';
+              } else if (audio.isInVoiceChannel) {
+                statusColor = Colors.green;
+                statusIcon = Icons.check;
+                statusText = 'Connected';
+              } else if (audio.error != null && audio.error!.contains('network')) {
+                statusColor = Colors.red;
+                statusIcon = Icons.signal_wifi_off;
+                statusText = 'Disconnected';
+              } else {
+                statusColor = Colors.orange;
+                statusIcon = Icons.sync;
+                statusText = 'Connecting...';
+              }
+              
               return Container(
                 margin: const EdgeInsets.only(right: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: audio.isInVoiceChannel ? Colors.green : Colors.orange,
+                  color: statusColor,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      audio.isInVoiceChannel ? Icons.check : Icons.sync,
+                      statusIcon,
                       size: 14,
                       color: Colors.white,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      audio.isInVoiceChannel ? 'Connected' : 'Connecting...',
+                      statusText,
                       style: const TextStyle(fontSize: 12, color: Colors.white),
                     ),
                   ],

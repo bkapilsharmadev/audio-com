@@ -13,6 +13,7 @@ class LivekitService {
 
   // Event streams
   final _connectionStateController = StreamController<bool>.broadcast();
+  final _reconnectingController = StreamController<bool>.broadcast();
   final _participantJoinedController = StreamController<RemoteParticipant>.broadcast();
   final _participantLeftController = StreamController<RemoteParticipant>.broadcast();
   final _speakingChangedController = StreamController<Map<String, dynamic>>.broadcast();
@@ -21,6 +22,7 @@ class LivekitService {
 
   // Public streams
   Stream<bool> get onConnectionStateChanged => _connectionStateController.stream;
+  Stream<bool> get onReconnecting => _reconnectingController.stream;
   Stream<RemoteParticipant> get onParticipantJoined => _participantJoinedController.stream;
   Stream<RemoteParticipant> get onParticipantLeft => _participantLeftController.stream;
   Stream<Map<String, dynamic>> get onSpeakingChanged => _speakingChangedController.stream;
@@ -121,6 +123,7 @@ class LivekitService {
 
   bool _isDeafened = false;
   bool get isDeafened => _isDeafened;
+  Set<String> _previousSpeakers = {}; // Track previous speakers for change detection
 
   /// Set deafened state - mutes/unmutes all incoming audio
   Future<void> setDeafened(bool deafened) async {
@@ -153,6 +156,7 @@ class LivekitService {
     _isMicEnabled = false;
     _isConnected = false;
     _isDeafened = false;  // Reset deafen state so new room starts fresh
+    _previousSpeakers = {}; // Reset speaking tracking
     
     _roomListener?.dispose();
     _roomListener = null;
@@ -171,6 +175,16 @@ class LivekitService {
         print('Room disconnected: ${event.reason}');
         _isConnected = false;
         _connectionStateController.add(false);
+      })
+      ..on<RoomReconnectingEvent>((event) {
+        print('⚠ Room reconnecting...');
+        _reconnectingController.add(true);
+      })
+      ..on<RoomReconnectedEvent>((event) {
+        print('✓ Room reconnected');
+        _isConnected = true;
+        _reconnectingController.add(false);
+        _connectionStateController.add(true);
       })
       ..on<ParticipantConnectedEvent>((event) {
         print('Participant joined: ${event.participant.identity}');
@@ -194,12 +208,38 @@ class LivekitService {
         print('Track unsubscribed: ${event.publication.sid}');
       })
       ..on<ActiveSpeakersChangedEvent>((event) {
-        for (final speaker in event.speakers) {
-          _speakingChangedController.add({
-            'participantId': speaker.identity,
-            'isSpeaking': true,
-          });
+        // Get current speaker identities
+        final currentSpeakers = event.speakers.map((s) => s.identity).toSet();
+        
+        // Debug: Log active speakers
+        if (currentSpeakers.isNotEmpty) {
+          print('🎤 Active speakers: $currentSpeakers');
         }
+        
+        // Emit false for speakers who stopped speaking
+        for (final prevSpeaker in _previousSpeakers) {
+          if (!currentSpeakers.contains(prevSpeaker)) {
+            print('🔇 Speaker stopped: $prevSpeaker');
+            _speakingChangedController.add({
+              'participantId': prevSpeaker,
+              'isSpeaking': false,
+            });
+          }
+        }
+        
+        // Emit true for new speakers
+        for (final speaker in event.speakers) {
+          if (!_previousSpeakers.contains(speaker.identity)) {
+            print('🎤 Speaker started: ${speaker.identity}');
+            _speakingChangedController.add({
+              'participantId': speaker.identity,
+              'isSpeaking': true,
+            });
+          }
+        }
+        
+        // Update previous speakers set
+        _previousSpeakers = currentSpeakers;
       })
       ..on<LocalTrackPublishedEvent>((event) {
         print('Local track published: ${event.publication.sid}');
@@ -215,6 +255,7 @@ class LivekitService {
   void dispose() {
     disconnect();
     _connectionStateController.close();
+    _reconnectingController.close();
     _participantJoinedController.close();
     _participantLeftController.close();
     _speakingChangedController.close();
