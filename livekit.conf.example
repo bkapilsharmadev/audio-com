@@ -1,0 +1,37 @@
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+keys:
+  audiocom_prod: MuZEN4fBLsu63MChdhMiZzbXR5ZC55VU
+
+# RTC / ICE configuration
+rtc:
+  # STUN server (coturn on same host)
+  # LiveKit prepends "stun:" automatically for stun_servers entries
+  stun_servers:
+    - YOUR_SERVER_IP:3478
+
+  # TURN server for relay fallback (coturn with long-term credentials)
+  # The 'secret' field enables HMAC-SHA1 time-limited credential generation
+  # and MUST match coturn's static-auth-secret
+  turn_servers:
+    - host: YOUR_SERVER_IP
+      port: 3478
+      protocol: udp
+      username: audiocom
+      credential: YOUR_TURN_CREDENTIAL_HERE
+    - host: YOUR_SERVER_IP
+      port: 3478
+      protocol: tcp
+      username: audiocom
+      credential: YOUR_TURN_CREDENTIAL_HERE
+
+# Webhook configuration - sends events to our Node.js server for fast disconnect detection
+webhook:
+  # Production: Use your public server URL
+  # For local dev with Docker: use http://host.docker.internal:3000/api/livekit/webhook
+  urls:
+    - https://YOUR_DOMAIN/api/livekit/webhook
+  # API key used for signing webhook payloads (must match one of the keys above)
+  api_key: audiocom_prod
