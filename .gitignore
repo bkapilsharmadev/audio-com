@@ -70,6 +70,10 @@ web_modules/
 .env.*
 !.env.example
 
+# LiveKit config (contains secrets)
+livekit.conf
+!livekit.conf.example
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

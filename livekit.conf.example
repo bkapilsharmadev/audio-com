@@ -3,35 +3,37 @@ bind_addresses:
   - 0.0.0.0
 
 keys:
-  audiocom_prod: MuZEN4fBLsu63MChdhMiZzbXR5ZC55VU
+  # Format: <api_key>: <api_secret>
+  # Generate secret with: openssl rand -base64 32
+  audiocom_prod: YOUR_LIVEKIT_API_SECRET_HERE
 
 # RTC / ICE configuration
 rtc:
   # STUN server (coturn on same host)
   # LiveKit prepends "stun:" automatically for stun_servers entries
   stun_servers:
-    - 64.227.189.7:3478
+    - YOUR_PUBLIC_IP:3478
 
   # TURN server for relay fallback (coturn with long-term credentials)
   # The 'secret' field enables HMAC-SHA1 time-limited credential generation
   # and MUST match coturn's static-auth-secret
   turn_servers:
-    - host: 64.227.189.7
+    - host: YOUR_PUBLIC_IP
       port: 3478
       protocol: udp
       username: audiocom
-      credential: 65521922b93f0426e65b4dce7ac66853b66281b8ee7b7096b74556858c5abdb7
-    - host: 64.227.189.7
+      credential: YOUR_TURN_CREDENTIAL_HERE
+    - host: YOUR_PUBLIC_IP
       port: 3478
       protocol: tcp
       username: audiocom
-      credential: 65521922b93f0426e65b4dce7ac66853b66281b8ee7b7096b74556858c5abdb7
+      credential: YOUR_TURN_CREDENTIAL_HERE
 
 # Webhook configuration - sends events to our Node.js server for fast disconnect detection
 webhook:
   # Production: Use your public server URL
   # For local dev with Docker: use http://host.docker.internal:3000/api/livekit/webhook
   urls:
-    - https://meeting.bytesjourney.com/api/livekit/webhook
+    - https://YOUR_DOMAIN/api/livekit/webhook
   # API key used for signing webhook payloads (must match one of the keys above)
   api_key: audiocom_prod
