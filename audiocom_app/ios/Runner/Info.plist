@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>AudioCom</string>
+	<string>KS Meet</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>AudioCom</string>
+	<string>KS Meet</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -45,13 +45,15 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<!-- AudioCom Permissions -->
+	<!-- KS Meet Permissions -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AudioCom needs microphone access for voice chat</string>
+	<string>KS Meet needs microphone access for voice chat</string>
+	<key>NSCameraUsageDescription</key>
+	<string>KS Meet needs camera access for video calls</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>AudioCom uses Bluetooth for audio devices</string>
+	<string>KS Meet uses Bluetooth for audio devices</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
-	<string>AudioCom uses Bluetooth for audio devices</string>
+	<string>KS Meet uses Bluetooth for audio devices</string>
 	<!-- Background Audio -->
 	<key>UIBackgroundModes</key>
 	<array>

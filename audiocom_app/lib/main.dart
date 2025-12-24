@@ -14,17 +14,17 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // Initialize foreground service handler
   ForegroundServiceHandler.init();
-  runApp(const AudioComApp());
+  runApp(const KsMeetApp());
 }
 
-class AudioComApp extends StatefulWidget {
-  const AudioComApp({super.key});
+class KsMeetApp extends StatefulWidget {
+  const KsMeetApp({super.key});
 
   @override
-  State<AudioComApp> createState() => _AudioComAppState();
+  State<KsMeetApp> createState() => _KsMeetAppState();
 }
 
-class _AudioComAppState extends State<AudioComApp> with WidgetsBindingObserver {
+class _KsMeetAppState extends State<KsMeetApp> with WidgetsBindingObserver {
   AuthProvider? _authProvider;
 
   @override
@@ -82,7 +82,7 @@ class _AudioComAppState extends State<AudioComApp> with WidgetsBindingObserver {
       ],
       child: WithForegroundTask(
         child: MaterialApp(
-          title: 'Google',
+          title: 'KS Meet',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             colorScheme: ColorScheme.fromSeed(
@@ -157,14 +157,14 @@ class _AppInitializerState extends State<AppInitializer> {
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.phone_android,
+                Icons.groups,
                 size: 64,
                 color: Colors.white,
               ),
             ),
             const SizedBox(height: 24),
             const Text(
-              'Google',
+              'KS Meet',
               style: TextStyle(
                 fontSize: 36,
                 fontWeight: FontWeight.bold,

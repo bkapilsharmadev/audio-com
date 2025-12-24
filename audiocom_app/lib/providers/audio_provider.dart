@@ -66,6 +66,55 @@ class AudioProvider extends ChangeNotifier {
   String? get error => _error;
   LivekitService get livekitService => _livekitService;
   int get audioBitrateKbps => _audioBitrateKbps;
+  AudioOutputDevice get currentAudioOutput => _livekitService.currentAudioOutput;
+  bool get isCameraEnabled => _livekitService.isCameraEnabled;
+  bool get isScreenShareEnabled => _livekitService.isScreenShareEnabled;
+  bool get isFrontCamera => _livekitService.isFrontCamera;
+
+  /// Cycle through audio outputs (speaker/earpiece/bluetooth)
+  Future<void> cycleAudioOutput() async {
+    await _livekitService.cycleAudioOutput();
+    notifyListeners();
+  }
+
+  /// Set specific audio output
+  Future<void> setAudioOutput(AudioOutputDevice device) async {
+    await _livekitService.setAudioOutput(device);
+    notifyListeners();
+  }
+
+  /// Toggle camera on/off
+  Future<void> toggleCamera() async {
+    await _livekitService.toggleCamera();
+    notifyListeners();
+  }
+
+  /// Flip between front and back camera
+  Future<void> flipCamera() async {
+    await _livekitService.flipCamera();
+    notifyListeners();
+  }
+
+  /// Toggle screen sharing
+  Future<void> toggleScreenShare() async {
+    await _livekitService.toggleScreenShare();
+    notifyListeners();
+  }
+
+  /// Get current video quality
+  VideoQualityPreset get currentVideoQuality => _livekitService.currentVideoQuality;
+
+  /// Set video quality
+  Future<void> setVideoQuality(VideoQualityPreset quality) async {
+    await _livekitService.setVideoQuality(quality);
+    notifyListeners();
+  }
+
+  /// Cycle through video quality presets
+  void cycleVideoQuality() {
+    _livekitService.cycleVideoQuality();
+    notifyListeners();
+  }
 
   /// Load settings from storage
   Future<void> _loadSettings() async {
@@ -195,6 +244,9 @@ class AudioProvider extends ChangeNotifier {
     try {
       await _livekitService.setMicrophoneEnabled(!newMuteState);
       _isMuted = newMuteState;
+      
+      // Update notification with mute status
+      await ForegroundServiceHandler.updateMuteStatus(_isMuted, roomName: _currentRoomName);
       
       // Update server state
       if (_currentUserId != null) {

@@ -1,27 +1,33 @@
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
+// Standard Android Foreground Service Types
+class ServiceType {
+  static const int MEDIA_PLAYBACK = 2;
+  static const int MEDIA_PROJECTION = 32;
+  static const int MICROPHONE = 128;
+}
+
 /// Foreground Service Handler for background audio
 class ForegroundServiceHandler {
   static bool _isInitialized = false;
+  static String? _currentRoomName;
 
   /// Initialize the foreground task
   static Future<void> init() async {
-    if (_isInitialized) return;
-
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'google_settings_channel',
-        channelName: 'Google Settings',
-        channelDescription: 'Keeps settings active in background',
-        channelImportance: NotificationChannelImportance.LOW,
-        priority: NotificationPriority.LOW,
+        channelId: 'ks_meet_call_channel',
+        channelName: 'KS Meet Calls',
+        channelDescription: 'Active voice call notification',
+        channelImportance: NotificationChannelImportance.HIGH,
+        priority: NotificationPriority.HIGH,
         playSound: false,
         enableVibration: false,
-        showWhen: false,
-        visibility: NotificationVisibility.VISIBILITY_SECRET,
+        showWhen: true,
+        visibility: NotificationVisibility.VISIBILITY_PUBLIC,
       ),
       iosNotificationOptions: const IOSNotificationOptions(
-        showNotification: false,
+        showNotification: true,
         playSound: false,
       ),
       foregroundTaskOptions: ForegroundTaskOptions(
@@ -39,36 +45,76 @@ class ForegroundServiceHandler {
   /// Start the foreground service when joining a voice call
   static Future<bool> startService(String roomName) async {
     await init();
+    _currentRoomName = roomName;
 
-    // Request notification permission for Android 13+
+    // Request notification permission
     final notificationPermission = 
         await FlutterForegroundTask.checkNotificationPermission();
     if (notificationPermission != NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
 
-    // Check if already running
     if (await FlutterForegroundTask.isRunningService) {
+      await updateNotification('In call: $roomName');
       return true;
     }
 
-    final result = await FlutterForegroundTask.startService(
-      notificationTitle: '',
-      notificationText: '',
-      callback: startCallback,
-    );
+    try {
+      // Default: Microphone + Media Playback
+      // Service types are read from Manifest in v9
+      final result = await FlutterForegroundTask.startService(
+        notificationTitle: 'KS Meet',
+        notificationText: 'In call: $roomName',
+        callback: startCallback,
+      );
+      
+      return result is ServiceRequestSuccess;
+    } catch (e) {
+      print('⚠️ Foreground service failed to start: $e');
+      return false;
+    }
+  }
+
+  /// Restart service with screen sharing capability
+  static Future<bool> setScreenShareEnabled(bool enabled) async {
+    if (!await FlutterForegroundTask.isRunningService) return false;
     
-    return result is ServiceRequestSuccess;
+    final roomName = _currentRoomName ?? 'Voice Call';
+    
+    // Stop current service
+    await FlutterForegroundTask.stopService();
+    
+    // Restart service
+    // Note: Types are driven by Manifest. This restart is mainly to 
+    // refresh the notification or state if needed.
+    try {
+      final result = await FlutterForegroundTask.startService(
+        notificationTitle: 'KS Meet',
+        notificationText: 'In call: $roomName',
+        callback: startCallback,
+      );
+      return result is ServiceRequestSuccess;
+    } catch(e) {
+       print('Error restarting service for screen share: $e');
+       return false;
+    }
   }
 
   /// Update the notification text
   static Future<void> updateNotification(String text) async {
     if (await FlutterForegroundTask.isRunningService) {
       FlutterForegroundTask.updateService(
-        notificationTitle: 'Google',
+        notificationTitle: 'KS Meet',
         notificationText: text,
       );
     }
+  }
+
+  /// Update notification with mute status
+  static Future<void> updateMuteStatus(bool isMuted, {String? roomName}) async {
+    final room = roomName ?? _currentRoomName ?? 'Voice Call';
+    final muteText = isMuted ? '🔇 Muted' : '🎤 Unmuted';
+    await updateNotification('$room • $muteText');
   }
 
   /// Stop the foreground service when leaving voice call
@@ -102,29 +148,25 @@ class AudioTaskHandler extends TaskHandler {
   @override
   void onRepeatEvent(DateTime timestamp) {
     // This keeps the service alive
-    // The actual audio is handled by LiveKit which runs in native code
   }
 
   @override
-  Future<void> onDestroy(DateTime timestamp) async {
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     // Called when the task is destroyed
   }
 
   @override
   void onNotificationButtonPressed(String id) {
     // Handle notification button presses
-    // 'mute' or 'leave' buttons
   }
 
   @override
   void onNotificationPressed() {
-    // When notification is tapped, bring app to foreground
     FlutterForegroundTask.launchApp();
   }
 
   @override
   void onNotificationDismissed() {
-    // Notification dismissed (swiped away)
-    // Don't stop the service - user should explicitly leave
+    // Notification dismissed
   }
 }

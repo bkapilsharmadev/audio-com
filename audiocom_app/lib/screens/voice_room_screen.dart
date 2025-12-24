@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:livekit_client/livekit_client.dart' hide Room, ChatMessage;
 import '../models/room.dart';
 import '../models/user.dart';
 import '../models/chat_message.dart';
 import '../providers/auth_provider.dart';
 import '../providers/room_provider.dart';
 import '../providers/audio_provider.dart';
+import '../services/livekit_service.dart';
 
 /// Voice Room Screen - active voice channel with chat
 class VoiceRoomScreen extends StatefulWidget {
@@ -173,92 +175,273 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Users in voice
-          Container(
-            padding: const EdgeInsets.all(8),
-            color: Colors.grey.shade800,
-            child: Consumer<RoomProvider>(
-              builder: (context, roomProvider, _) {
-                return SizedBox(
-                  height: 80,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: roomProvider.roomUsers.length,
-                    itemBuilder: (context, index) {
-                      return _buildUserAvatar(roomProvider.roomUsers[index]);
+      body: Consumer<AudioProvider>(
+        builder: (context, audio, _) {
+          final hasVideo = audio.isCameraEnabled || audio.isScreenShareEnabled ||
+              _hasRemoteVideo(audio);
+          
+          return Column(
+            children: [
+              // Video grid (when video is active)
+              if (hasVideo)
+                Expanded(
+                  flex: 2,
+                  child: _buildVideoGrid(audio),
+                ),
+              
+              // Users in voice (smaller when video active)
+              Container(
+                padding: const EdgeInsets.all(8),
+                color: Colors.grey.shade800,
+                child: Consumer<RoomProvider>(
+                  builder: (context, roomProvider, _) {
+                    return SizedBox(
+                      height: hasVideo ? 60 : 80,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: roomProvider.roomUsers.length,
+                        itemBuilder: (context, index) {
+                          return _buildUserAvatar(roomProvider.roomUsers[index], compact: hasVideo);
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+              
+              // Chat messages (collapsible when video active)
+              if (!hasVideo)
+                Expanded(
+                  child: Consumer<RoomProvider>(
+                    builder: (context, roomProvider, _) {
+                      return ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(8),
+                        itemCount: roomProvider.chatMessages.length,
+                        itemBuilder: (context, index) {
+                          return _buildChatMessage(roomProvider.chatMessages[index]);
+                        },
+                      );
                     },
                   ),
-                );
-              },
-            ),
-          ),
-          
-          // Chat messages
-          Expanded(
-            child: Consumer<RoomProvider>(
-              builder: (context, roomProvider, _) {
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(8),
-                  itemCount: roomProvider.chatMessages.length,
-                  itemBuilder: (context, index) {
-                    return _buildChatMessage(roomProvider.chatMessages[index]);
-                  },
-                );
-              },
-            ),
-          ),
-          
-          // Chat input
-          Container(
-            padding: const EdgeInsets.all(8),
-            color: Colors.grey.shade800,
-            child: Row(
-              children: [
+                )
+              else
+                // Mini chat when video is active
                 Expanded(
-                  child: TextField(
-                    controller: _chatController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'Send a message...',
-                      hintStyle: TextStyle(color: Colors.grey.shade500),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey.shade700,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
+                  flex: 1,
+                  child: Consumer<RoomProvider>(
+                    builder: (context, roomProvider, _) {
+                      return ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        itemCount: roomProvider.chatMessages.length,
+                        itemBuilder: (context, index) {
+                          return _buildChatMessage(roomProvider.chatMessages[index], compact: true);
+                        },
+                      );
+                    },
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: _sendMessage,
-                  icon: const Icon(Icons.send, color: Colors.indigo),
+              
+              // Chat input
+              Container(
+                padding: const EdgeInsets.all(8),
+                color: Colors.grey.shade800,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _chatController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Send a message...',
+                          hintStyle: TextStyle(color: Colors.grey.shade500),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey.shade700,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: _sendMessage,
+                      icon: const Icon(Icons.send, color: Colors.indigo),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          
-          // Voice controls
-          _buildVoiceControls(),
-          
-          // Safe area padding for system navigation
-          SizedBox(height: bottomPadding),
-        ],
+              ),
+              
+              // Voice/Video controls
+              _buildVoiceControls(),
+              
+              // Safe area padding for system navigation
+              SizedBox(height: bottomPadding),
+            ],
+          );
+        },
       ),
     ),  // Close PopScope
     );
   }
 
-  Widget _buildUserAvatar(User user) {
+  /// Check if any remote participant has video
+  bool _hasRemoteVideo(AudioProvider audio) {
+    final room = audio.livekitService.room;
+    if (room == null) return false;
+    
+    for (final participant in room.remoteParticipants.values) {
+      for (final pub in participant.videoTrackPublications) {
+        if (pub.subscribed && pub.track != null) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Build the video grid
+  Widget _buildVideoGrid(AudioProvider audio) {
+    final room = audio.livekitService.room;
+    if (room == null) return const SizedBox.shrink();
+
+    final List<Widget> videoTiles = [];
+
+    // Local video (camera or screen share)
+    final localParticipant = room.localParticipant;
+    if (localParticipant != null) {
+      // Camera
+      for (final pub in localParticipant.videoTrackPublications) {
+        if (pub.track != null && pub.source == TrackSource.camera) {
+          videoTiles.add(_buildVideoTile(
+            pub.track as VideoTrack,
+            'You',
+            isLocal: true,
+            isFront: audio.isFrontCamera,
+          ));
+        }
+      }
+      // Screen share
+      for (final pub in localParticipant.videoTrackPublications) {
+        if (pub.track != null && pub.source == TrackSource.screenShareVideo) {
+          videoTiles.add(_buildVideoTile(
+            pub.track as VideoTrack,
+            'Your Screen',
+            isLocal: true,
+            isScreenShare: true,
+          ));
+        }
+      }
+    }
+
+    // Remote videos
+    for (final participant in room.remoteParticipants.values) {
+      for (final pub in participant.videoTrackPublications) {
+        if (pub.subscribed && pub.track != null) {
+          final isScreen = pub.source == TrackSource.screenShareVideo;
+          videoTiles.add(_buildVideoTile(
+            pub.track as VideoTrack,
+            isScreen ? '${participant.identity}\'s Screen' : participant.identity,
+            isScreenShare: isScreen,
+          ));
+        }
+      }
+    }
+
+    if (videoTiles.isEmpty) return const SizedBox.shrink();
+
+    // Layout based on number of videos
+    if (videoTiles.length == 1) {
+      return Padding(
+        padding: const EdgeInsets.all(4),
+        child: videoTiles.first,
+      );
+    }
+
+    return GridView.count(
+      crossAxisCount: videoTiles.length <= 4 ? 2 : 3,
+      padding: const EdgeInsets.all(4),
+      mainAxisSpacing: 4,
+      crossAxisSpacing: 4,
+      children: videoTiles,
+    );
+  }
+
+  /// Build a single video tile
+  Widget _buildVideoTile(VideoTrack track, String name, {
+    bool isLocal = false,
+    bool isFront = true,
+    bool isScreenShare = false,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade700),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            VideoTrackRenderer(
+              track,
+              fit: isScreenShare ? VideoViewFit.contain : VideoViewFit.cover,
+              mirrorMode: isLocal && !isScreenShare && isFront 
+                  ? VideoViewMirrorMode.mirror 
+                  : VideoViewMirrorMode.off,
+            ),
+            // Name overlay
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  name,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ),
+            // Flip camera button for local video
+            if (isLocal && !isScreenShare)
+              Positioned(
+                right: 8,
+                top: 8,
+                child: GestureDetector(
+                  onTap: () => context.read<AudioProvider>().flipCamera(),
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserAvatar(User user, {bool compact = false}) {
+    final avatarSize = compact ? 40.0 : 48.0;
+    final fontSize = compact ? 9.0 : 11.0;
+    final iconSize = compact ? 10.0 : 12.0;
+    
     // Network status colors
     Color networkIndicatorColor;
     IconData? networkIcon;
@@ -279,18 +462,20 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 8),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Stack(
             children: [
               // Animated speaking ring
               if (user.isSpeaking)
                 _SpeakingRing(
-                  child: _buildAvatarCircle(user),
+                  size: avatarSize,
+                  child: _buildAvatarCircle(user, size: avatarSize),
                 )
               else
-                _buildAvatarCircle(user),
+                _buildAvatarCircle(user, size: avatarSize),
               // Muted indicator (bottom right)
               if (user.isMuted)
                 Positioned(
@@ -302,7 +487,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                       color: Colors.red,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.mic_off, size: 12, color: Colors.white),
+                    child: Icon(Icons.mic_off, size: iconSize, color: Colors.white),
                   ),
                 ),
               // Deafened indicator (bottom left when muted, bottom right when only deafened)
@@ -317,7 +502,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                       color: Colors.orange.shade700,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.headset_off, size: 12, color: Colors.white),
+                    child: Icon(Icons.headset_off, size: iconSize, color: Colors.white),
                   ),
                 ),
               // Network status indicator (top right) - only show if not good
@@ -331,21 +516,21 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                       color: networkIndicatorColor,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(networkIcon, size: 12, color: Colors.white),
+                    child: Icon(networkIcon, size: iconSize, color: Colors.white),
                   ),
                 ),
             ],
           ),
           const SizedBox(height: 4),
           SizedBox(
-            width: 60,
+            width: compact ? 50 : 60,
             child: Text(
               user.name,
               style: TextStyle(
                 color: (user.networkStatus == 'disconnected' || user.networkStatus == 'reconnecting')
                     ? Colors.red.shade300 
                     : Colors.grey.shade300,
-                fontSize: 11,
+                fontSize: fontSize,
               ),
               textAlign: TextAlign.center,
               maxLines: 1,
@@ -357,16 +542,16 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     );
   }
 
-  Widget _buildChatMessage(ChatMessage message) {
+  Widget _buildChatMessage(ChatMessage message, {bool compact = false}) {
     if (message.isSystem) {
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: EdgeInsets.symmetric(vertical: compact ? 2 : 4),
         child: Center(
           child: Text(
             message.content,
             style: TextStyle(
               color: Colors.grey.shade500,
-              fontSize: 12,
+              fontSize: compact ? 10 : 12,
               fontStyle: FontStyle.italic,
             ),
           ),
@@ -375,6 +560,31 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     }
 
     final isMe = message.userId == context.read<AuthProvider>().currentUser?.id;
+
+    if (compact) {
+      // Compact inline format for video mode
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 1),
+        child: RichText(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: '${message.userName ?? 'Unknown'}: ',
+                style: TextStyle(
+                  color: isMe ? Colors.indigo.shade300 : Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                ),
+              ),
+              TextSpan(
+                text: message.content,
+                style: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -438,39 +648,109 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   Widget _buildVoiceControls() {
     return Consumer<AudioProvider>(
       builder: (context, audio, _) {
+        // Get icon for current audio output
+        IconData audioOutputIcon;
+        String audioOutputLabel;
+        switch (audio.currentAudioOutput) {
+          case AudioOutputDevice.speaker:
+            audioOutputIcon = Icons.volume_up;
+            audioOutputLabel = 'Speaker';
+            break;
+          case AudioOutputDevice.earpiece:
+            audioOutputIcon = Icons.phone_in_talk;
+            audioOutputLabel = 'Earpiece';
+            break;
+          case AudioOutputDevice.bluetooth:
+            audioOutputIcon = Icons.bluetooth_audio;
+            audioOutputLabel = 'Bluetooth';
+            break;
+          case AudioOutputDevice.wired:
+            audioOutputIcon = Icons.headset;
+            audioOutputLabel = 'Headset';
+            break;
+        }
+
         return Container(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
           color: Colors.grey.shade800,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              // Mute button
-              _buildControlButton(
-                icon: audio.isMuted ? Icons.mic_off : Icons.mic,
-                label: audio.isMuted ? 'Unmute' : 'Mute',
-                isActive: !audio.isMuted,
-                activeColor: Colors.green,
-                onPressed: audio.isInVoiceChannel ? audio.toggleMute : null,
-              ),
-              
-              // Deafen button
-              _buildControlButton(
-                icon: audio.isDeafened ? Icons.headset_off : Icons.headset,
-                label: audio.isDeafened ? 'Undeafen' : 'Deafen',
-                isActive: !audio.isDeafened,
-                activeColor: Colors.blue,
-                onPressed: audio.isInVoiceChannel ? audio.toggleDeafen : null,
-              ),
-              
-              // Leave button
-              _buildControlButton(
-                icon: Icons.call_end,
-                label: 'Leave',
-                isActive: true,
-                activeColor: Colors.red,
-                onPressed: _leaveRoom,
-              ),
-            ],
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Mute button
+                _buildControlButton(
+                  icon: audio.isMuted ? Icons.mic_off : Icons.mic,
+                  label: audio.isMuted ? 'Unmute' : 'Mute',
+                  isActive: !audio.isMuted,
+                  activeColor: Colors.green,
+                  onPressed: audio.isInVoiceChannel ? audio.toggleMute : null,
+                ),
+                const SizedBox(width: 8),
+                
+                // Camera button
+                _buildControlButton(
+                  icon: audio.isCameraEnabled ? Icons.videocam : Icons.videocam_off,
+                  label: audio.isCameraEnabled ? 'Cam Off' : 'Cam On',
+                  isActive: audio.isCameraEnabled,
+                  activeColor: Colors.teal,
+                  onPressed: audio.isInVoiceChannel ? audio.toggleCamera : null,
+                ),
+                const SizedBox(width: 8),
+                
+                // Video quality button (only show when camera is on)
+                if (audio.isCameraEnabled)
+                  ...[
+                    _buildControlButton(
+                      icon: _getQualityIcon(audio.currentVideoQuality),
+                      label: _getQualityLabel(audio.currentVideoQuality),
+                      isActive: true,
+                      activeColor: Colors.cyan,
+                      onPressed: audio.isInVoiceChannel ? () => _showVideoQualityPicker(audio) : null,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                
+                // Screen share button
+                _buildControlButton(
+                  icon: audio.isScreenShareEnabled ? Icons.stop_screen_share : Icons.screen_share,
+                  label: audio.isScreenShareEnabled ? 'Stop' : 'Share',
+                  isActive: audio.isScreenShareEnabled,
+                  activeColor: Colors.orange,
+                  onPressed: audio.isInVoiceChannel ? audio.toggleScreenShare : null,
+                ),
+                const SizedBox(width: 8),
+                
+                // Audio output button
+                _buildControlButton(
+                  icon: audioOutputIcon,
+                  label: audioOutputLabel,
+                  isActive: true,
+                  activeColor: Colors.purple,
+                  onPressed: audio.isInVoiceChannel ? audio.cycleAudioOutput : null,
+                ),
+                const SizedBox(width: 8),
+                
+                // Deafen button
+                _buildControlButton(
+                  icon: audio.isDeafened ? Icons.headset_off : Icons.headset_mic,
+                  label: audio.isDeafened ? 'Undeaf' : 'Deafen',
+                  isActive: !audio.isDeafened,
+                  activeColor: Colors.blue,
+                  onPressed: audio.isInVoiceChannel ? audio.toggleDeafen : null,
+                ),
+                const SizedBox(width: 8),
+                
+                // Leave button
+                _buildControlButton(
+                  icon: Icons.call_end,
+                  label: 'Leave',
+                  isActive: true,
+                  activeColor: Colors.red,
+                  onPressed: _leaveRoom,
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -488,8 +768,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 56,
-          height: 56,
+          width: 48,
+          height: 48,
           decoration: BoxDecoration(
             color: isActive 
                 ? activeColor.withOpacity(0.2) 
@@ -501,7 +781,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             icon: Icon(
               icon,
               color: isActive ? activeColor : Colors.grey,
-              size: 28,
+              size: 24,
             ),
           ),
         ),
@@ -510,10 +790,127 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           label,
           style: TextStyle(
             color: Colors.grey.shade400,
-            fontSize: 11,
+            fontSize: 10,
           ),
         ),
       ],
+    );
+  }
+
+  /// Get icon for video quality
+  IconData _getQualityIcon(VideoQualityPreset quality) {
+    switch (quality) {
+      case VideoQualityPreset.low:
+        return Icons.sd;
+      case VideoQualityPreset.medium:
+        return Icons.hd;
+      case VideoQualityPreset.high:
+        return Icons.four_k;
+    }
+  }
+
+  /// Get label for video quality
+  String _getQualityLabel(VideoQualityPreset quality) {
+    switch (quality) {
+      case VideoQualityPreset.low:
+        return 'Low';
+      case VideoQualityPreset.medium:
+        return 'Med';
+      case VideoQualityPreset.high:
+        return 'HD';
+    }
+  }
+
+  /// Show video quality picker
+  void _showVideoQualityPicker(AudioProvider audio) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Video Quality',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Lower quality = less battery usage & data',
+                style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              _buildQualityOption(
+                audio,
+                VideoQualityPreset.low,
+                'Low',
+                '240p @ 15fps • Battery saver',
+                Icons.battery_saver,
+              ),
+              _buildQualityOption(
+                audio,
+                VideoQualityPreset.medium,
+                'Medium',
+                '360p @ 24fps • Balanced',
+                Icons.speed,
+              ),
+              _buildQualityOption(
+                audio,
+                VideoQualityPreset.high,
+                'HD',
+                '720p @ 30fps • Best quality',
+                Icons.high_quality,
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Build a quality option tile
+  Widget _buildQualityOption(
+    AudioProvider audio,
+    VideoQualityPreset quality,
+    String title,
+    String subtitle,
+    IconData icon,
+  ) {
+    final isSelected = audio.currentVideoQuality == quality;
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: isSelected ? Colors.cyan : Colors.grey.shade400,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: isSelected ? Colors.cyan : Colors.white,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+      ),
+      trailing: isSelected
+          ? const Icon(Icons.check_circle, color: Colors.cyan)
+          : null,
+      onTap: () {
+        audio.setVideoQuality(quality);
+        Navigator.pop(context);
+      },
     );
   }
 
@@ -521,10 +918,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  Widget _buildAvatarCircle(User user) {
+  Widget _buildAvatarCircle(User user, {double size = 48}) {
     return Container(
-      width: 48,
-      height: 48,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         color: Colors.grey.shade700,
         shape: BoxShape.circle,
@@ -532,9 +929,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       child: Center(
         child: Text(
           user.name.isNotEmpty ? user.name[0].toUpperCase() : '?',
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 20,
+            fontSize: size * 0.4,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -546,8 +943,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 /// Animated speaking ring widget
 class _SpeakingRing extends StatefulWidget {
   final Widget child;
+  final double size;
   
-  const _SpeakingRing({required this.child});
+  const _SpeakingRing({required this.child, this.size = 48});
 
   @override
   State<_SpeakingRing> createState() => _SpeakingRingState();
@@ -583,6 +981,9 @@ class _SpeakingRingState extends State<_SpeakingRing> with SingleTickerProviderS
 
   @override
   Widget build(BuildContext context) {
+    final outerSize = widget.size + 4;
+    final innerSize = widget.size + 2;
+    
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -593,8 +994,8 @@ class _SpeakingRingState extends State<_SpeakingRing> with SingleTickerProviderS
             Transform.scale(
               scale: _scaleAnimation.value,
               child: Container(
-                width: 52,
-                height: 52,
+                width: outerSize,
+                height: outerSize,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
@@ -606,8 +1007,8 @@ class _SpeakingRingState extends State<_SpeakingRing> with SingleTickerProviderS
             ),
             // Inner green border
             Container(
-              width: 50,
-              height: 50,
+              width: innerSize,
+              height: innerSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: Colors.green, width: 2),
