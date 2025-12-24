@@ -27,17 +27,26 @@ CameraCaptureOptions getCameraCaptureForQuality(VideoQualityPreset quality) {
     case VideoQualityPreset.low:
       return const CameraCaptureOptions(
         maxFrameRate: 15,
-        params: VideoParametersPresets.h180_169,
+        params: VideoParameters(
+          dimensions: VideoDimensions(320, 400), // 4:5
+          encoding: VideoEncoding(maxBitrate: 150 * 1000, maxFramerate: 15),
+        ),
       );
     case VideoQualityPreset.medium:
       return const CameraCaptureOptions(
         maxFrameRate: 24,
-        params: VideoParametersPresets.h360_169,
+        params: VideoParameters(
+          dimensions: VideoDimensions(480, 600), // 4:5
+          encoding: VideoEncoding(maxBitrate: 500 * 1000, maxFramerate: 24),
+        ),
       );
     case VideoQualityPreset.high:
       return const CameraCaptureOptions(
         maxFrameRate: 30,
-        params: VideoParametersPresets.h720_169,
+        params: VideoParameters(
+          dimensions: VideoDimensions(720, 900), // 4:5
+          encoding: VideoEncoding(maxBitrate: 1500 * 1000, maxFramerate: 30),
+        ),
       );
   }
 }
