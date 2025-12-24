@@ -54,7 +54,7 @@ Your Node server defaults to these values if not provided, but for production yo
 Your current [docker-compose.yml](docker-compose.yml) starts LiveKit with:
 
 ```yaml
-command: --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-139.59.28.92}
+command: --config /etc/livekit/livekit.conf --node-ip ${LIVEKIT_NODE_IP:-64.227.189.7}
 ```
 
 In cloud hosting, this **must not** be your home LAN IP. Use the VM’s public IPv4 (or an address LiveKit should advertise for ICE candidates).
@@ -86,7 +86,7 @@ These steps work on both AWS EC2 and DigitalOcean Droplets.
   - DigitalOcean: Reserved IP (optional but recommended)
 
 Point DNS:
-- `A` record: `voice.example.com` → VM public IP
+- `A` record: `meeting.bytesjourney.com` → VM public IP
 
 ### 2) Install packages
 
@@ -216,7 +216,7 @@ map $http_upgrade $connection_upgrade {
 
 server {
   listen 80;
-  server_name voice.example.com;
+  server_name meeting.bytesjourney.com;
 
   location / {
     proxy_pass http://127.0.0.1:3000;
@@ -241,7 +241,7 @@ sudo systemctl reload nginx
 Issue TLS cert:
 
 ```bash
-sudo certbot --nginx -d voice.example.com
+sudo certbot --nginx -d meeting.bytesjourney.com
 ```
 
 ### 8) Open firewall ports
@@ -261,9 +261,9 @@ Also ensure your cloud firewall / security group allows the same ports (see AWS/
 
 ### 9) Verify
 
-- App UI: `https://voice.example.com/`
-- Health: `https://voice.example.com/api/health`
-- LiveKit signaling via proxy should be reachable from the browser at: `wss://voice.example.com/livekit/rtc`
+- App UI: `https://meeting.bytesjourney.com/`
+- Health: `https://meeting.bytesjourney.com/api/health`
+- LiveKit signaling via proxy should be reachable from the browser at: `wss://meeting.bytesjourney.com/livekit/rtc`
 
 If the UI loads but audio doesn’t connect:
 - Re-check LiveKit `--node-ip` and cloud firewall for `7881/tcp` + `7882/udp`.

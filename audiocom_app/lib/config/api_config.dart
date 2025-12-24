@@ -4,7 +4,7 @@ class ApiConfig {
   // For local development on Android emulator, use 10.0.2.2 instead of localhost
   // For iOS simulator, use localhost or your machine's IP
   // For physical devices, use your machine's local IP address
-  static const String baseUrl = 'https://voice.bytesjourney.com';
+  static const String baseUrl = 'https://meeting.bytesjourney.com';
   
   // WebSocket URL (same host, /ws path)
   static String get wsUrl {
