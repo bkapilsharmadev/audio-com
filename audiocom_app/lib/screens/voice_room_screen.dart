@@ -307,36 +307,40 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     return false;
   }
 
+  String? _maximizedTrackId; // State to track maximized video
+
   /// Build the video grid
   Widget _buildVideoGrid(AudioProvider audio) {
     final room = audio.livekitService.room;
     if (room == null) return const SizedBox.shrink();
 
     final List<Widget> videoTiles = [];
+    final List<VideoTrack> tracks = [];
+    final List<String> names = [];
+    final List<bool> isLocals = [];
+    final List<bool> isFronts = [];
+    final List<bool> isScreenShares = [];
 
-    // Local video (camera or screen share)
+    // Helper to add track data
+    void addTrack(VideoTrack track, String name, {bool isLocal = false, bool isFront = false, bool isScreenShare = false}) {
+      tracks.add(track);
+      names.add(name);
+      isLocals.add(isLocal);
+      isFronts.add(isFront);
+      isScreenShares.add(isScreenShare);
+    }
+
+    // Local video
     final localParticipant = room.localParticipant;
     if (localParticipant != null) {
-      // Camera
       for (final pub in localParticipant.videoTrackPublications) {
         if (pub.track != null && pub.source == TrackSource.camera) {
-          videoTiles.add(_buildVideoTile(
-            pub.track as VideoTrack,
-            'You',
-            isLocal: true,
-            isFront: audio.isFrontCamera,
-          ));
+          addTrack(pub.track as VideoTrack, 'You', isLocal: true, isFront: audio.isFrontCamera);
         }
       }
-      // Screen share
       for (final pub in localParticipant.videoTrackPublications) {
         if (pub.track != null && pub.source == TrackSource.screenShareVideo) {
-          videoTiles.add(_buildVideoTile(
-            pub.track as VideoTrack,
-            'Your Screen',
-            isLocal: true,
-            isScreenShare: true,
-          ));
+          addTrack(pub.track as VideoTrack, 'Your Screen', isLocal: true, isScreenShare: true);
         }
       }
     }
@@ -346,18 +350,94 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       for (final pub in participant.videoTrackPublications) {
         if (pub.subscribed && pub.track != null) {
           final isScreen = pub.source == TrackSource.screenShareVideo;
-          videoTiles.add(_buildVideoTile(
-            pub.track as VideoTrack,
+          addTrack(pub.track as VideoTrack, 
             isScreen ? '${participant.identity}\'s Screen' : participant.identity,
-            isScreenShare: isScreen,
-          ));
+            isScreenShare: isScreen);
         }
       }
     }
 
-    if (videoTiles.isEmpty) return const SizedBox.shrink();
+    if (tracks.isEmpty) return const SizedBox.shrink();
 
-    // Layout based on number of videos
+    // build tiles
+    for (int i = 0; i < tracks.length; i++) {
+      final track = tracks[i];
+      // Use track.sid or fallback to index if null/empty
+      final trackId = track.sid ?? 'track_$i';
+      
+      videoTiles.add(GestureDetector(
+        onTap: () {
+          setState(() {
+            _maximizedTrackId = (_maximizedTrackId == trackId) ? null : trackId;
+          });
+        },
+        child: _buildVideoTile(
+          track,
+          names[i],
+          isLocal: isLocals[i],
+          isFront: isFronts[i],
+          isScreenShare: isScreenShares[i],
+          showMaximizeIcon: true,
+          isMaximized: _maximizedTrackId == trackId,
+        ),
+      ));
+    }
+
+    // Maximized Layout
+    if (_maximizedTrackId != null) {
+      // Find the maximized tile index
+      int maxIndex = -1;
+      for (int i = 0; i < tracks.length; i++) {
+        if ((tracks[i].sid ?? 'track_$i') == _maximizedTrackId) {
+          maxIndex = i;
+          break;
+        }
+      }
+      
+      // If track not found (e.g. user left), reset
+      if (maxIndex == -1) {
+        // Schedule reset for next frame
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _maximizedTrackId = null);
+        });
+        return const SizedBox.shrink(); // Temporary
+      }
+
+      final maximizedTile = videoTiles[maxIndex];
+      final otherTiles = List<Widget>.from(videoTiles)..removeAt(maxIndex);
+
+      return Column(
+        children: [
+          // Maximized Video
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: maximizedTile,
+            ),
+          ),
+          
+          // Strip of other videos
+          if (otherTiles.isNotEmpty)
+            SizedBox(
+              height: 120,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.all(4),
+                itemCount: otherTiles.length,
+                separatorBuilder: (c, i) => const SizedBox(width: 4),
+                itemBuilder: (context, index) {
+                  return SizedBox(
+                    width: 160, // Fixed aspect ratio approx
+                    child: otherTiles[index],
+                  );
+                },
+              ),
+            ),
+        ],
+      );
+    }
+
+    // Standard Grid Layout
     if (videoTiles.length == 1) {
       return Padding(
         padding: const EdgeInsets.all(4),
@@ -379,12 +459,14 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     bool isLocal = false,
     bool isFront = true,
     bool isScreenShare = false,
+    bool showMaximizeIcon = false,
+    bool isMaximized = false,
   }) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey.shade700),
+        border: Border.all(color: isMaximized ? Colors.indigoAccent : Colors.grey.shade700, width: isMaximized ? 2 : 1),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
@@ -430,6 +512,41 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                     child: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 20),
                   ),
                 ),
+              ),
+              
+            // Maximize/Minimize Icon Overlay
+            if (showMaximizeIcon)
+              Positioned.fill(
+                child: Center(
+                  child: AnimatedOpacity(
+                    opacity: isMaximized ? 0.0 : 0.0, // Hidden generally, can be visible on hover if generic desktop
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      isMaximized ? Icons.fullscreen_exit : Icons.fullscreen,
+                      color: Colors.white.withOpacity(0.7),
+                      size: 48,
+                    ),
+                  ),
+                ),
+              ),
+              
+            // Small maximize indicator in corner
+             if (showMaximizeIcon && !isLocal) // Don't clutter local too much
+              Positioned(
+                right: 8,
+                top: 8,
+                 child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isMaximized ? Icons.fullscreen_exit : Icons.fullscreen, 
+                      color: Colors.white, 
+                      size: 16
+                    ),
+                  ),
               ),
           ],
         ),

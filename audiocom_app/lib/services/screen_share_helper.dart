@@ -12,6 +12,17 @@ class ScreenShareHelper {
     }
   }
 
+  /// Trigger permission dialog and start service if accepted
+  static Future<bool> requestPermission() async {
+    try {
+      final bool? result = await _channel.invokeMethod('requestPermission');
+      return result ?? false;
+    } on PlatformException catch (e) {
+      print("Failed to request permission: '${e.message}'.");
+      return false;
+    }
+  }
+
   /// Stop the native screen share foreground service
   static Future<void> stopService() async {
     try {

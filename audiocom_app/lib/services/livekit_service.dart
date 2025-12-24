@@ -324,17 +324,26 @@ class LivekitService {
       return false;
     }
 
-    // Android 14+: Start dedicated native foreground service
-    if (Platform.isAndroid) {
-      print('🚀 Starting native screen share service...');
-      await ScreenShareHelper.startService();
-      // Short delay to ensure service is fully registered
-      await Future.delayed(const Duration(milliseconds: 500));
-    }
-
     try {
-      // Request screen capture permission and create screen track
+      // 1. Android 14 Workaround: "Double Prompt" Strategy
+      // We must start the Foreground Service with mediaProjection type.
+      // But we can't start it without a Token (Consent).
+      // So we ask for Consent (Dialog 1) -> Start Service -> Ask for Consent (Dialog 2) -> Start Capture.
+      if (Platform.isAndroid) {
+         print('Requesting FGS permission...');
+         final granted = await ScreenShareHelper.requestPermission();
+         if (!granted) {
+           print('❌ Permission for FGS denied');
+           return false;
+         }
+         // Small delay to ensure service is up
+         await Future.delayed(const Duration(milliseconds: 200));
+      }
+
+      // 2. Start Capture (This might trigger a second dialog on some stored sessions)
+      print('Starting screen capture...');
       await _localParticipant!.setScreenShareEnabled(true, captureScreenAudio: true);
+      
       _isScreenShareEnabled = true;
       _screenShareChangedController.add(true);
       print('✅ Screen sharing started');
@@ -342,22 +351,24 @@ class LivekitService {
     } on PlatformException catch (e) {
       print('❌ Platform error starting screen share: $e');
       _errorController.add('Screen share error: ${e.message}');
-      
-      // Stop service on failure
-      if (Platform.isAndroid) {
-        await ScreenShareHelper.stopService();
-      }
+      await _cleanupScreenShare();
       return false;
     } catch (e) {
       print('❌ Failed to start screen share: $e');
       _errorController.add('Screen share error: $e');
-       
-      // Stop service on failure
-      if (Platform.isAndroid) {
-        await ScreenShareHelper.stopService();
-      }
+      await _cleanupScreenShare();
       return false;
     }
+  }
+
+  Future<void> _cleanupScreenShare() async {
+    if (Platform.isAndroid) {
+      await ScreenShareHelper.stopService();
+    }
+    // Also try to disable track if it was partially created
+    try {
+      await _localParticipant?.setScreenShareEnabled(false);
+    } catch (_) {} 
   }
 
   /// Stop screen sharing
